@@ -499,7 +499,10 @@
         GAME = result.snapshot.val();
         render();
       }
-    }catch(e){ console.error('update failed', e); }
+    } catch (e) {
+  console.error('update failed', e);
+  throw e;
+    }
   }
  
   function subscribeToRoom(room){
@@ -941,17 +944,50 @@
     }
   };
  
-  $('btnPeekReady').onclick = async ()=>{
-    await updateGame(fresh=>{
-      fresh.players[ME.slot].ready = true;
-      if(fresh.players.length===2 && fresh.players.every(p=>p.ready)){
+  $('btnPeekReady').onclick = async () => {
+  const button = $('btnPeekReady');
+  button.disabled = true;
+  button.textContent = 'Marking ready…';
+
+  try {
+    await updateGame(fresh => {
+      if (!fresh.players) {
+        throw new Error('Players were not found.');
+      }
+
+      const players = Array.isArray(fresh.players)
+        ? fresh.players
+        : Object.values(fresh.players);
+
+      const player = players.find(
+        p => Number(p.slot) === Number(ME.slot)
+      );
+
+      if (!player) {
+        throw new Error(`Player slot ${ME.slot} was not found.`);
+      }
+
+      player.ready = true;
+      fresh.players = players;
+
+      if (
+        players.length === 2 &&
+        players.every(player => player.ready === true)
+      ) {
         fresh.phase = 'playing';
         fresh.turn = 0;
         fresh.turnState = 'await_draw';
+        fresh.log = fresh.log || [];
         fresh.log.push('Both players are ready — the game begins!');
       }
     });
-  };
+  } catch (error) {
+    console.error('Ready button failed:', error);
+    button.disabled = false;
+    button.textContent = "I've seen my cards — Ready";
+    alert(`Could not mark you ready: ${error.message}`);
+  }
+};
  
   $('drawBtn').onclick = async ()=>{
     await updateGame(fresh=>{
