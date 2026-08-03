@@ -470,13 +470,41 @@
   function roomRef(room){
     return firebase.database().ref('cambio-rooms/' + room);
   }
- 
-  async function loadState(room){
-    try{
-      const snap = await roomRef(room).get();
-      return snap.exists() ? snap.val() : null;
-    }catch(e){ console.error('load failed', e); return null; }
+  function normalizeGameState(state) {
+  if (!state) return state;
+
+  state.players = Array.isArray(state.players)
+    ? state.players
+    : Object.values(state.players || {});
+
+  state.deck = Array.isArray(state.deck)
+    ? state.deck
+    : Object.values(state.deck || {});
+
+  state.discard = Array.isArray(state.discard)
+    ? state.discard
+    : Object.values(state.discard || {});
+
+  state.log = Array.isArray(state.log)
+    ? state.log
+    : Object.values(state.log || {});
+
+  state.scores = state.scores || { 0: 0, 1: 0 };
+
+  return state;
+}
+  async function loadState(room) {
+  try {
+    const snap = await roomRef(room).get();
+
+    return snap.exists()
+      ? normalizeGameState(snap.val())
+      : null;
+  } catch (e) {
+    console.error('load failed', e);
+    return null;
   }
+}
   async function saveState(room, state){
     try{
       await roomRef(room).set(state);
@@ -487,35 +515,51 @@
   // Uses a Firebase transaction so that if both players act at almost the same
   // moment, updates don't silently overwrite each other — Firebase retries the
   // mutation against the latest data automatically.
-  async function updateGame(mutator){
-    if(!ME) return;
-    try{
-      const result = await roomRef(ME.room).transaction(current=>{
-        if(current===null || current===undefined) return current;
-        mutator(current);
+ async function updateGame(mutator) {
+  if (!ME) return;
+
+  try {
+    const result = await roomRef(ME.room).transaction(current => {
+      if (current === null || current === undefined) {
         return current;
-      });
-      if(result.committed && result.snapshot.exists()){
-        GAME = result.snapshot.val();
-        render();
       }
-    } catch (e) {
-  console.error('update failed', e);
-  throw e;
+
+      current = normalizeGameState(current);
+      mutator(current);
+
+      return current;
+    });
+
+    if (result.committed && result.snapshot.exists()) {
+      GAME = normalizeGameState(result.snapshot.val());
+      render();
     }
+
+    return result;
+  } catch (e) {
+    console.error('update failed', e);
+    throw e;
   }
+}
  
-  function subscribeToRoom(room){
-    unsubscribeFromRoom();
-    const ref = roomRef(room);
-    const fn = snap => {
-      const val = snap.val();
-      if(val){ GAME = val; render(); }
-    };
-    ref.on('value', fn);
-    roomListenerRef = ref;
-    roomListenerFn = fn;
-  }
+  function subscribeToRoom(room) {
+  unsubscribeFromRoom();
+
+  const ref = roomRef(room);
+
+  const fn = snap => {
+    const val = normalizeGameState(snap.val());
+
+    if (val) {
+      GAME = val;
+      render();
+    }
+  };
+
+  ref.on('value', fn);
+  roomListenerRef = ref;
+  roomListenerFn = fn;
+}
   function unsubscribeFromRoom(){
     if(roomListenerRef && roomListenerFn){ roomListenerRef.off('value', roomListenerFn); }
     roomListenerRef = null; roomListenerFn = null;
@@ -914,7 +958,7 @@
     }
  
     ME = {room, slot: assignedSlot, name};
-    GAME = result.snapshot.val();
+    GAME = normalizeGameState(result.snapshot.val());
     location.hash = `room=${room}&slot=${ME.slot}`;
     subscribeToRoom(room);
     render();
