@@ -181,8 +181,37 @@
   <div class="wordmark">CAMB<span class="pip">◆</span>O</div>
   <div class="tagline">a two-player card duel</div>
  
+  <!-- SETUP (shown until Firebase is configured) -->
+  <div class="screen" id="screenSetup">
+    <div class="panel wide">
+      <h2 style="margin-bottom:10px;">One-time setup needed</h2>
+      <p class="hint" style="margin-top:0;">
+        This page needs a free shared database so two different computers can see the same game.
+        A page hosted on Vercel/GitHub Pages has nothing like that built in, so you'll connect a free
+        <b>Firebase Realtime Database</b> — it takes about 5 minutes and costs nothing for a game like this.
+      </p>
+      <ol style="line-height:1.9; padding-left:20px;">
+        <li>Go to <a class="linklike" href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> and click <b>Add project</b> (any name is fine; you can skip Google Analytics).</li>
+        <li>In your new project, open <b>Build → Realtime Database</b> in the left menu, click <b>Create Database</b>, pick any region, and start in <b>test mode</b>.</li>
+        <li>Still on the Realtime Database page, open the <b>Rules</b> tab and set it to:
+          <pre style="background:rgba(0,0,0,.3); padding:10px; border-radius:8px; overflow-x:auto; font-size:.78rem;">{
+  "rules": {
+    ".read": true,
+    ".write": true
+  }
+}</pre>
+          then click <b>Publish</b>. (This makes the room data public — fine for a casual game with a friend, since room codes are private and hard to guess.)
+        </li>
+        <li>Click the gear icon → <b>Project settings</b>, scroll to <b>Your apps</b>, click the <b>&lt;/&gt;</b> (web) icon, register an app (nickname anything), and copy the <code>firebaseConfig</code> object it shows you.</li>
+        <li>Open <code>cambio.html</code> in a text editor, find <code>FIREBASE_CONFIG</code> near the top of the <code>&lt;script&gt;</code> section, and paste your values in (apiKey, authDomain, databaseURL, projectId).</li>
+        <li>Save, redeploy to Vercel, and reload this page — this screen will disappear once it's configured correctly.</li>
+      </ol>
+      <p class="hint">Only one of you needs to do this setup and redeploy — your friend just uses the link you send them afterward.</p>
+    </div>
+  </div>
+ 
   <!-- LOBBY -->
-  <div class="screen active" id="screenLobby">
+  <div class="screen" id="screenLobby">
     <div class="panel">
       <div class="field">
         <label for="inputName">Your name</label>
@@ -303,8 +332,10 @@
     </div>
   </div>
  
-  <div class="footer-note">Played on the honor system — since this uses simple shared storage rather than a private server, please don't peek at the browser's network data. Have fun and trust your opponent!</div>
+  <div class="footer-note">Played on the honor system — since this uses a simple shared database rather than a private server, please don't peek at the browser's network data. Have fun and trust your opponent!</div>
  
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
 (function(){
   "use strict";
@@ -313,10 +344,20 @@
   const SUITS = {H:'♥', D:'♦', C:'♣', S:'♠'};
   const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
  
+  // ---------- FIREBASE CONFIG ----------
+  // Paste the config object from your own free Firebase project here.
+  // See the on-page "Setup" screen (shown automatically until you fill this in)
+  // for step-by-step instructions on creating one — it takes about 5 minutes.
+  const FIREBASE_CONFIG = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT"
+  };
+ 
   // ---------- STATE (local, ephemeral) ----------
   let ME = null;        // {room, slot, name}
   let GAME = null;      // last known shared game state
-  let pollTimer = null;
   let selectMode = null; // current local interaction mode
   let jqFirst = null;
   let kLookTarget = null;
@@ -325,6 +366,7 @@
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
   const screens = {
+    setup: $('screenSetup'),
     lobby: $('screenLobby'), waiting: $('screenWaiting'), peek: $('screenPeek'),
     game: $('screenGame'), roundover: $('screenRoundover')
   };
@@ -409,40 +451,67 @@
     </div>`;
   }
  
-  // ---------- STORAGE ----------
-  function gameKey(room){ return `cambio-room-${room}`; }
+  // ---------- STORAGE (Firebase Realtime Database) ----------
+  // This game needs somewhere both players' browsers can read/write shared state.
+  // Claude.ai artifacts have a built-in storage API, but a plain page hosted on
+  // Vercel/GitHub Pages does not — so we use Firebase's free Realtime Database instead.
+  // See the on-page setup screen (shown automatically until FIREBASE_CONFIG below is filled in).
+  let roomListenerRef = null;
+  let roomListenerFn = null;
+ 
+  function isFirebaseConfigured(){
+    return !!(FIREBASE_CONFIG && FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY');
+  }
+ 
+  function roomRef(room){
+    return firebase.database().ref('cambio-rooms/' + room);
+  }
+ 
   async function loadState(room){
     try{
-      const res = await window.storage.get(gameKey(room), true);
-      if(!res) return null;
-      return JSON.parse(res.value);
-    }catch(e){ return null; }
+      const snap = await roomRef(room).get();
+      return snap.exists() ? snap.val() : null;
+    }catch(e){ console.error('load failed', e); return null; }
   }
   async function saveState(room, state){
     try{
-      await window.storage.set(gameKey(room), JSON.stringify(state), true);
+      await roomRef(room).set(state);
       return true;
     }catch(e){ console.error('save failed', e); return false; }
   }
  
+  // Uses a Firebase transaction so that if both players act at almost the same
+  // moment, updates don't silently overwrite each other — Firebase retries the
+  // mutation against the latest data automatically.
   async function updateGame(mutator){
-    let fresh = null;
-    if(ME){ fresh = await loadState(ME.room); }
-    if(!fresh) fresh = GAME;
-    if(!fresh) return;
-    mutator(fresh);
-    GAME = fresh;
-    render();
-    if(ME) await saveState(ME.room, fresh);
+    if(!ME) return;
+    try{
+      const result = await roomRef(ME.room).transaction(current=>{
+        if(current===null || current===undefined) return current;
+        mutator(current);
+        return current;
+      });
+      if(result.committed && result.snapshot.exists()){
+        GAME = result.snapshot.val();
+        render();
+      }
+    }catch(e){ console.error('update failed', e); }
   }
  
-  function startPolling(){
-    if(pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(async ()=>{
-      if(!ME) return;
-      const fresh = await loadState(ME.room);
-      if(fresh){ GAME = fresh; render(); }
-    }, 1500);
+  function subscribeToRoom(room){
+    unsubscribeFromRoom();
+    const ref = roomRef(room);
+    const fn = snap => {
+      const val = snap.val();
+      if(val){ GAME = val; render(); }
+    };
+    ref.on('value', fn);
+    roomListenerRef = ref;
+    roomListenerFn = fn;
+  }
+  function unsubscribeFromRoom(){
+    if(roomListenerRef && roomListenerFn){ roomListenerRef.off('value', roomListenerFn); }
+    roomListenerRef = null; roomListenerFn = null;
   }
  
   // ---------- GAME LOGIC ----------
@@ -790,38 +859,57 @@
     const name = $('inputName').value.trim();
     let room = $('inputRoom').value.trim().toUpperCase();
     $('lobbyError').textContent = '';
+    if(!isFirebaseConfigured()){ render(); return; }
     if(!name){ $('lobbyError').textContent = 'Enter your name first.'; return; }
     if(!room){ room = randomRoomCode(); $('inputRoom').value = room; }
  
-    let state = await loadState(room);
-    if(!state){
-      state = {
-        room, snapEnabled:false, phase:'lobby',
-        players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
-        deck:[], discard:[], turn:0, turnState:null,
-        drawnCard:null, pendingPower:null, cambio:null,
-        log:[`${name} created the room.`],
-        scores:{0:0,1:0}, round:0
-      };
-      ME = {room, slot:0, name};
-      await saveState(room, state);
-    } else {
-      const existingIdx = state.players.findIndex(p=>p.name.toLowerCase()===name.toLowerCase());
-      if(existingIdx !== -1){
-        ME = {room, slot: existingIdx, name: state.players[existingIdx].name};
-      } else if(state.players.length < 2){
-        state.players.push({slot:1, name, cards:[], ready:false, roundTotal:0});
-        state.log.push(`${name} joined the room.`);
-        ME = {room, slot:1, name};
-        await saveState(room, state);
-      } else {
-        $('lobbyError').textContent = 'That room already has two players. Try a different room code.';
-        return;
-      }
+    let assignedSlot = null;
+    let full = false;
+    let result;
+    try{
+      result = await roomRef(room).transaction(current=>{
+        assignedSlot = null; full = false;
+        if(current===null || current===undefined){
+          assignedSlot = 0;
+          return {
+            room, snapEnabled:false, phase:'lobby',
+            players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
+            deck:[], discard:[], turn:0, turnState:null,
+            drawnCard:null, pendingPower:null, cambio:null,
+            log:[`${name} created the room.`],
+            scores:{0:0,1:0}, round:0
+          };
+        }
+        const existingIdx = current.players.findIndex(p=>p.name.toLowerCase()===name.toLowerCase());
+        if(existingIdx !== -1){
+          assignedSlot = existingIdx;
+          return current;
+        }
+        if(current.players.length < 2){
+          assignedSlot = 1;
+          current.players.push({slot:1, name, cards:[], ready:false, roundTotal:0});
+          current.log = current.log || [];
+          current.log.push(`${name} joined the room.`);
+          return current;
+        }
+        full = true;
+        return; // abort transaction, room is full
+      });
+    }catch(e){
+      console.error(e);
+      $('lobbyError').textContent = 'Could not reach the game server. Check the Firebase setup (see setup screen) and your internet connection.';
+      return;
     }
-    GAME = state;
+ 
+    if(!result.committed || full){
+      $('lobbyError').textContent = 'That room already has two players. Try a different room code.';
+      return;
+    }
+ 
+    ME = {room, slot: assignedSlot, name};
+    GAME = result.snapshot.val();
     location.hash = `room=${room}&slot=${ME.slot}`;
-    startPolling();
+    subscribeToRoom(room);
     render();
   }
  
@@ -925,6 +1013,14 @@
  
   // ---------- INIT ----------
   async function init(){
+    if(!isFirebaseConfigured()){
+      showScreen('setup');
+      return;
+    }
+    try{
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }catch(e){ /* already initialized (hot reload etc.) */ }
+ 
     const params = new URLSearchParams(location.hash.replace(/^#/,''));
     const room = params.get('room');
     const slot = params.get('slot');
@@ -933,7 +1029,7 @@
       if(state && state.players[Number(slot)]){
         ME = {room, slot:Number(slot), name: state.players[Number(slot)].name};
         GAME = state;
-        startPolling();
+        subscribeToRoom(room);
         render();
         return;
       }
