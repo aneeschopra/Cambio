@@ -185,12 +185,31 @@
   .table-row{
     display:flex;
     gap:24px;
-    align-items:center;
+    align-items:flex-start;
     justify-content:center;
     margin:0;
     min-height:132px;
   }
-  .pile-wrap{display:flex; flex-direction:column; align-items:center; gap:6px;}
+  .pile-wrap{
+    display:grid;
+    grid-template-rows:16px 92px 18px;
+    row-gap:6px;
+    justify-items:center;
+    align-items:start;
+  }
+  .pile-label{
+    height:16px;
+    line-height:16px;
+    margin:0;
+  }
+  #drawPileEl,
+  #discardPileEl{
+    width:64px;
+    height:92px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+  }
 
   .discard-placeholder{
     position:relative;
@@ -225,7 +244,16 @@
     font-family:'JetBrains Mono',monospace;
   }
 
-  .pile-label{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); font-family:'JetBrains Mono',monospace;}
+  .pile-label{
+    font-size:.68rem;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    color:var(--gold);
+    font-family:'JetBrains Mono',monospace;
+    height:16px;
+    line-height:16px;
+    margin:0;
+  }
   .count{font-size:.75rem; color:var(--cream); opacity:.8;}
  
 
@@ -343,7 +371,16 @@
   }
   .power-bar p{margin:0 0 10px; font-size:.9rem;}
  
-  .log-panel{width:100%; max-width:920px; margin-top:6px; background:rgba(0,0,0,.22); border-radius:12px; padding:10px 16px; max-height:130px; overflow-y:auto;}
+  .log-panel{
+    width:100%;
+    max-width:none;
+    margin:0;
+    background:rgba(0,0,0,.18);
+    border-radius:10px;
+    padding:9px 14px;
+    max-height:110px;
+    overflow-y:auto;
+  }
   .log-line{font-size:.78rem; opacity:.8; padding:3px 0; border-bottom:1px dashed rgba(244,236,218,.12); font-family:'JetBrains Mono',monospace;}
  
   .peek-grid{display:grid; grid-template-columns:repeat(2,74px); grid-auto-rows:92px; gap:12px; margin:18px 0; justify-content:center;}
@@ -400,7 +437,36 @@
     transform:translateY(0);
   }
 
-  .footer-note{max-width:520px; text-align:center; font-size:.72rem; opacity:.55; margin-top:20px; line-height:1.5;}
+  .footer-note{
+    width:100%;
+    max-width:1100px;
+    margin-top:18px;
+    padding:14px 18px 12px;
+    background:rgba(0,0,0,.18);
+    border-radius:12px;
+    border-top:1px solid rgba(96,190,145,.55);
+    box-shadow:0 8px 24px rgba(0,0,0,.18);
+  }
+  .footer-log-wrap{
+    width:100%;
+  }
+  .footer-section-label{
+    margin:0 0 7px;
+    color:var(--gold);
+    font-size:.68rem;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    font-family:'JetBrains Mono',monospace;
+  }
+  .footer-disclaimer{
+    margin-top:10px;
+    padding-top:9px;
+    border-top:1px solid rgba(96,190,145,.35);
+    text-align:center;
+    font-size:.72rem;
+    line-height:1.5;
+    opacity:.58;
+  }
   a.linklike{color:var(--gold);}
 </style>
 </head>
@@ -541,7 +607,6 @@
       </div>
     </div>
 
-    <div class="log-panel" id="gameLog"></div>
   </div>
 
 
@@ -568,7 +633,15 @@
  
   <div class="toast-banner" id="toastBanner"></div>
 
-  <div class="footer-note">Played on the honor system — since this uses a simple shared database rather than a private server, please don't peek at the browser's network data. Have fun and trust your opponent!</div>
+  <div class="footer-note">
+    <div class="footer-log-wrap">
+      <div class="footer-section-label">Game log</div>
+      <div class="log-panel" id="gameLog"></div>
+    </div>
+    <div class="footer-disclaimer">
+      Played on the honor system — since this uses a simple shared database rather than a private server, please don't peek at the browser's network data. Have fun and trust your opponent!
+    </div>
+  </div>
  
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
