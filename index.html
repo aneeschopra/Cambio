@@ -1198,14 +1198,9 @@
               from:'drawn-area',
               to:{owner:ME.slot, idx},
               visibility:'hidden'
-            },
-            {
-              card:old,
-              from:{owner:ME.slot, idx},
-              to:'discard-pile',
-              visibility:'public'
             }
-          ]
+          ],
+          revealDiscardCardId: old.id
         });
         fresh.log.push(`${fresh.players[ME.slot].name} used their turn to take ${cardLabel(taken)} from the discard pile and replace one of their cards. No power activated.`);
         completeTurn(fresh);
@@ -1232,14 +1227,9 @@
               from:'drawn-area',
               to:{owner:ME.slot, idx},
               visibility:'hidden'
-            },
-            {
-              card:old,
-              from:{owner:ME.slot, idx},
-              to:'discard-pile',
-              visibility:'public'
             }
-          ]
+          ],
+          revealDiscardCardId: old.id
         });
         fresh.log.push(`${fresh.players[ME.slot].name} swapped in a new card and discarded ${cardLabel(old)}. Hand-discarded cards do not activate powers.`);
         completeTurn(fresh);
@@ -1547,6 +1537,21 @@
     const motion = GAME.motion;
     lastSeenMotionId = motion.id;
 
+    let hiddenDiscardEl = null;
+
+    // During a swap, the replaced card is already present in the final
+    // Firebase state. Hide it until the incoming card finishes moving.
+    if(motion.revealDiscardCardId){
+      const discardAnchor = document.querySelector('[data-motion-anchor="discard-pile"]');
+      hiddenDiscardEl = discardAnchor
+        ? discardAnchor.querySelector(`[data-card-id="${motion.revealDiscardCardId}"]`)
+        : null;
+
+      if(hiddenDiscardEl){
+        hiddenDiscardEl.style.visibility = 'hidden';
+      }
+    }
+
     const steps = Array.isArray(motion.steps)
       ? motion.steps
       : [{
@@ -1558,6 +1563,12 @@
 
     for(const step of steps){
       await playMotionStep(step, motion.actorSlot);
+    }
+
+    // No outgoing-card animation: simply reveal the replaced card
+    // on top of the discard pile after the incoming motion completes.
+    if(hiddenDiscardEl){
+      hiddenDiscardEl.style.visibility = '';
     }
   }
 
