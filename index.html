@@ -98,15 +98,20 @@
   .card-slot{
     width:64px; height:92px; border-radius:8px; position:relative;
     box-shadow:0 4px 10px rgba(0,0,0,.4);
-    animation: pop-in .2s ease;
+    animation: pop-in .55s cubic-bezier(.22,.8,.3,1);
   }
-  @keyframes pop-in{ from{opacity:0; transform:scale(.85);} to{opacity:1; transform:scale(1);} }
+  @keyframes pop-in{
+    0%{opacity:0; transform:translateY(-12px) scale(.9);}
+    65%{opacity:1; transform:translateY(2px) scale(1.02);}
+    100%{opacity:1; transform:translateY(0) scale(1);}
+  }
   .card-slot.empty{
     background:transparent; border:2px dashed rgba(244,236,218,.3); box-shadow:none;
     display:flex; align-items:center; justify-content:center; font-size:.65rem; color:rgba(244,236,218,.5);
   }
   .card-back{
     width:100%; height:100%; border-radius:8px;
+    animation:card-settle .55s cubic-bezier(.22,.8,.3,1);
     background:
       repeating-linear-gradient(45deg, var(--felt) 0, var(--felt) 6px, var(--felt-light) 6px, var(--felt-light) 12px);
     border:2px solid var(--gold-dim);
@@ -118,6 +123,7 @@
   }
   .card-face{
     width:100%; height:100%; border-radius:8px; background:var(--card-bg);
+    animation:card-settle .55s cubic-bezier(.22,.8,.3,1);
     border:2px solid #d9cdb0; display:flex; flex-direction:column; justify-content:space-between;
     padding:6px; color:var(--ink); font-family:'JetBrains Mono',monospace;
   }
@@ -127,6 +133,10 @@
   .card-face.black{color:var(--ink);}
   .card-slot.clickable{cursor:pointer; outline:2px solid var(--gold); outline-offset:2px; animation: pulse 1.4s infinite;}
   @keyframes pulse{0%,100%{box-shadow:0 4px 10px rgba(0,0,0,.4), 0 0 0 0 rgba(216,178,106,.6);} 50%{box-shadow:0 4px 10px rgba(0,0,0,.4), 0 0 0 6px rgba(216,178,106,0);}}
+  @keyframes card-settle{
+    0%{opacity:.25; transform:translateY(-10px);}
+    100%{opacity:1; transform:translateY(0);}
+  }
  
   .grids-wrap{display:flex; gap:26px; flex-wrap:wrap; justify-content:center; width:100%; margin:18px 0;}
   .player-zone{flex:1; min-width:230px; background:rgba(0,0,0,.18); border-radius:14px; padding:14px; border:1px solid rgba(216,178,106,.2);}
@@ -149,9 +159,49 @@
   .cambio-notice{background:var(--danger); color:var(--cream); padding:8px 14px; border-radius:8px; font-weight:600; text-align:center; margin-bottom:10px; display:none;}
  
   .action-bar{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:10px 0;}
-  .drawn-card-area{display:none; text-align:center; margin:14px 0;}
+  .turn-dynamic-area{
+    position:relative;
+    width:100%;
+    height:176px;
+    margin:8px 0 2px;
+  }
+  .drawn-card-area{
+    display:block;
+    position:absolute;
+    inset:0;
+    text-align:center;
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .drawn-card-area.visible{
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+  }
   .drawn-card-area .card-slot{margin:0 auto 10px;}
-  .power-bar{display:none; background:rgba(0,0,0,.25); border:1px solid var(--gold-dim); border-radius:10px; padding:12px 16px; margin:10px 0; text-align:center;}
+  .power-bar{
+    display:block;
+    position:absolute;
+    left:0;
+    right:0;
+    top:28px;
+    background:rgba(0,0,0,.25);
+    border:1px solid var(--gold-dim);
+    border-radius:10px;
+    padding:12px 16px;
+    text-align:center;
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .power-bar.visible{
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+  }
   .power-bar p{margin:0 0 10px; font-size:.9rem;}
  
   .log-panel{width:100%; max-width:920px; margin-top:6px; background:rgba(0,0,0,.22); border-radius:12px; padding:10px 16px; max-height:130px; overflow-y:auto;}
@@ -295,21 +345,21 @@
       <div class="hint" id="matchHint" style="text-align:center; display:none;">
         Either player may play a face-down card matching the discard rank at any time. A wrong guess adds a penalty card and does not change the turn.
       </div>
- 
-      <div class="drawn-card-area" id="drawnCardArea">
+      <div class="turn-dynamic-area">
+        <div class="drawn-card-area" id="drawnCardArea">
         <div id="drawnCardDisplay"></div>
         <div class="action-bar">
           <button id="swapBtn">Swap into one of my cards</button>
           <button id="discardBtn" class="secondary">Just discard it</button>
         </div>
       </div>
- 
-      <div class="power-bar" id="powerBar">
+
+        <div class="power-bar" id="powerBar">
         <p id="powerBarText"></p>
         <button id="skipPowerBtn" class="secondary small">Skip power</button>
       </div>
- 
-      <div class="grids-wrap" id="gameGridsWrap">
+      </div>
+<div class="grids-wrap" id="gameGridsWrap">
         <div class="player-zone">
           <h3 id="myNameLabel"></h3>
           <div class="card-grid" id="myGridEl"></div>
@@ -865,11 +915,11 @@
     $('snapBtn').textContent = selectMode==='snap-select' ? 'Cancel Match' : 'Play Matching Card';
  
     const showDrawn = myTurn && GAME.turnState==='await_decide' && GAME.drawnCard;
-    $('drawnCardArea').style.display = showDrawn ? 'block' : 'none';
+    $('drawnCardArea').classList.toggle('visible', !!showDrawn);
     if(showDrawn){ $('drawnCardDisplay').innerHTML = cardHTML(GAME.drawnCard, true); }
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
-    $('powerBar').style.display = showPower ? 'block' : 'none';
+    $('powerBar').classList.toggle('visible', !!showPower);
     if(showPower){ $('powerBarText').textContent = powerInstruction(GAME.pendingPower.type, selectMode); }
  
     $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
