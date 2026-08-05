@@ -143,12 +143,20 @@
   .player-zone h3{font-size:1rem; color:var(--gold); margin-bottom:10px; font-family:'Inter',sans-serif; font-weight:700;}
   .card-grid{
     display:grid;
-    grid-template-columns:repeat(2, 64px);
+    grid-template-columns:repeat(2,64px) repeat(3,64px);
     grid-auto-rows:92px;
     gap:8px;
     justify-content:start;
     align-items:start;
+    min-height:192px;
   }
+  .card-grid .card-slot:nth-child(1){grid-column:1;grid-row:1;}
+  .card-grid .card-slot:nth-child(2){grid-column:2;grid-row:1;}
+  .card-grid .card-slot:nth-child(3){grid-column:1;grid-row:2;}
+  .card-grid .card-slot:nth-child(4){grid-column:2;grid-row:2;}
+  .card-grid .card-slot:nth-child(5){grid-column:3;grid-row:1;}
+  .card-grid .card-slot:nth-child(6){grid-column:3;grid-row:2;}
+  .card-grid .card-slot:nth-child(7){grid-column:4;grid-row:1;}
  
   .top-play-area{
     display:grid;
@@ -272,6 +280,32 @@
   .popup-box p{font-size:.9rem; margin-bottom:16px;}
   .popup-btns{display:flex; gap:10px; justify-content:center; flex-wrap:wrap;}
  
+
+  .toast-banner{
+    position:fixed;
+    top:18px;
+    right:18px;
+    z-index:100;
+    max-width:340px;
+    padding:11px 14px;
+    border-radius:10px;
+    background:#8f3730;
+    color:var(--cream);
+    border:1px solid rgba(255,255,255,.22);
+    box-shadow:0 10px 28px rgba(0,0,0,.35);
+    font-weight:600;
+    font-size:.86rem;
+    line-height:1.35;
+    opacity:0;
+    transform:translateY(-10px);
+    pointer-events:none;
+    transition:opacity .22s ease, transform .22s ease;
+  }
+  .toast-banner.show{
+    opacity:1;
+    transform:translateY(0);
+  }
+
   .footer-note{max-width:520px; text-align:center; font-size:.72rem; opacity:.55; margin-top:20px; line-height:1.5;}
   a.linklike{color:var(--gold);}
 </style>
@@ -440,6 +474,8 @@
     </div>
   </div>
  
+  <div class="toast-banner" id="toastBanner"></div>
+
   <div class="footer-note">Played on the honor system — since this uses a simple shared database rather than a private server, please don't peek at the browser's network data. Have fun and trust your opponent!</div>
  
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
@@ -599,6 +635,12 @@
     ? state.log
     : Object.values(state.log || {});
 
+  state.players.forEach(p=>{
+    if(!Array.isArray(p.cards)){
+      p.cards = Object.values(p.cards || {});
+    }
+  });
+
   state.scores = state.scores || { 0: 0, 1: 0 };
   state.snapEnabled = true;
 
@@ -636,10 +678,20 @@
     });
 
     if (result.committed && result.snapshot.exists()) {
+      const previousPenaltyAt = GAME && GAME.lastPenalty ? GAME.lastPenalty.at : null;
       captureMotionRects();
       GAME = normalizeGameState(result.snapshot.val());
       render();
       runMotionAnimations();
+
+      if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
+        if(GAME.lastPenalty.playerSlot === ME.slot){
+          showToast('Wrong card. You got a penalty card added');
+        } else {
+          const penalized = GAME.players[GAME.lastPenalty.playerSlot];
+          showToast(`${penalized ? penalized.name : 'Opponent'} got a penalty card added`);
+        }
+      }
     }
 
     return result;
@@ -658,10 +710,20 @@
     const val = normalizeGameState(snap.val());
 
     if (val) {
+      const previousPenaltyAt = GAME && GAME.lastPenalty ? GAME.lastPenalty.at : null;
       captureMotionRects();
       GAME = val;
       render();
       runMotionAnimations();
+
+      if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
+        const penalized = GAME.players[GAME.lastPenalty.playerSlot];
+        if(penalized && GAME.lastPenalty.playerSlot === ME.slot){
+          showToast('Wrong card. You got a penalty card added');
+        } else if(penalized){
+          showToast(`${penalized.name} got a penalty card added`);
+        }
+      }
     }
   };
 
@@ -674,6 +736,84 @@
     roomListenerRef = null; roomListenerFn = null;
   }
  
+
+  function activeCardCount(player){
+    return (player.cards || []).filter(Boolean).length;
+  }
+
+  function addCardToStableSlot(player, card){
+    player.cards = player.cards || [];
+
+    // Refill any empty position in the original 2x2 grid first.
+    for(let i=0; i<4; i++){
+      if(!player.cards[i]){
+        player.cards[i] = card;
+        return i;
+      }
+    }
+
+    // Otherwise append to the right without shifting existing positions.
+    player.cards.push(card);
+    return player.cards.length - 1;
+  }
+
+  function removeCardFromStableSlot(player, idx){
+    if(!player.cards || !player.cards[idx]) return null;
+    const card = player.cards[idx];
+    player.cards[idx] = null;
+
+    // Trim only empty slots at the very end. Never shift existing cards.
+    while(player.cards.length > 4 && player.cards[player.cards.length - 1] === null){
+      player.cards.pop();
+    }
+
+    return card;
+  }
+
+  function showToast(message){
+    const el = $('toastBanner');
+    if(!el) return;
+    el.textContent = message;
+    el.classList.add('show');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(()=>el.classList.remove('show'), 2400);
+  }
+
+  function enforceSevenCardLoss(state){
+    const loser = state.players.find(p => activeCardCount(p) >= 7);
+    if(!loser) return false;
+
+    const winner = state.players.find(p => p.slot !== loser.slot);
+    state.phase = 'roundover';
+    state.forcedLoss = {
+      loserSlot: loser.slot,
+      winnerSlot: winner ? winner.slot : null,
+      reason: 'seven-cards'
+    };
+    state.drawnCard = null;
+    state.pendingPower = null;
+    state.turnState = null;
+    state.log = state.log || [];
+    state.log.push(`${loser.name} reached 7 cards and automatically lost the game.`);
+    return true;
+  }
+
+  function givePenaltyCard(state, playerSlot){
+    if(state.deck.length===0) reshuffleDiscardIntoDeck(state);
+    const penalty = state.deck.length ? state.deck.pop() : null;
+    if(!penalty) return false;
+
+    addCardToStableSlot(state.players[playerSlot], penalty);
+    state.lastPenalty = {
+      playerSlot,
+      at: Date.now(),
+      message: 'Wrong card. You got a penalty card added'
+    };
+
+    enforceSevenCardLoss(state);
+    return true;
+  }
+
   // ---------- GAME LOGIC ----------
   function dealNewRound(state){
     state.snapEnabled = true;
@@ -690,6 +830,8 @@
     state.drawnCard = null;
     state.pendingPower = null;
     state.cambio = null;
+    state.forcedLoss = null;
+    state.lastPenalty = null;
     state.round = (state.round||0) + 1;
     if(!state.scores) state.scores = {0:0,1:0};
     state.log.push(`— Round ${state.round} dealt —`);
@@ -732,7 +874,7 @@
  
   function finalizeRound(state){
     state.players.forEach(p=>{
-      const total = p.cards.reduce((s,c)=>s+cardValue(c),0);
+      const total = p.cards.filter(Boolean).reduce((s,c)=>s+cardValue(c),0);
       p.roundTotal = total;
       state.scores[p.slot] = (state.scores[p.slot]||0) + total;
     });
@@ -749,15 +891,15 @@
       if(!target) return;
       const me = fresh.players[ME.slot].name;
       if(target.rank === top.rank){
-        arr.splice(idx,1);
+        removeCardFromStableSlot(fresh.players[owner], idx);
         fresh.discard.push(target);
         fresh.log.push(`${me} played a matching ${cardLabel(target)} without using a turn.`);
         if(owner !== ME.slot) needGive = true;
       } else {
-        if(fresh.deck.length===0) reshuffleDiscardIntoDeck(fresh);
-        const penalty = fresh.deck.length ? fresh.deck.pop() : null;
-        if(penalty) fresh.players[ME.slot].cards.push(penalty);
-        fresh.log.push(`${me} played the wrong rank and took a penalty card without changing the turn.`);
+        const added = givePenaltyCard(fresh, ME.slot);
+        if(added){
+          fresh.log.push(`${me} played the wrong rank and took a penalty card without changing the turn.`);
+        }
       }
     });
     if(needGive){ snapGiveTarget = owner; selectMode = 'snap-give'; }
@@ -804,6 +946,7 @@
  
   async function onCardCellClick(owner, idx){
     if(!GAME || !ME) return;
+    if(!GAME.players[owner] || !GAME.players[owner].cards[idx]) return;
     const myTurn = GAME.turn === ME.slot;
  
     if(selectMode==='swap-own' && myTurn && owner===ME.slot){
@@ -902,9 +1045,11 @@
     if(selectMode==='snap-give'){
       if(owner!==ME.slot) return;
       await updateGame(fresh=>{
-        const card = fresh.players[ME.slot].cards.splice(idx,1)[0];
-        fresh.players[snapGiveTarget].cards.push(card);
+        const card = removeCardFromStableSlot(fresh.players[ME.slot], idx);
+        if(!card) return;
+        addCardToStableSlot(fresh.players[snapGiveTarget], card);
         fresh.log.push(`${fresh.players[ME.slot].name} handed a card to ${fresh.players[snapGiveTarget].name}.`);
+        enforceSevenCardLoss(fresh);
       });
       selectMode=null; snapGiveTarget=null; render();
       return;
@@ -1014,7 +1159,7 @@
     $('peekOtherStatus').textContent = opp ? (opp.ready ? `${opp.name} is ready.` : `Waiting for ${opp.name}…`) : '';
     $('peekGrid').innerHTML = me.cards.map((c,i)=>{
       const faceUp = (i>=2) && !me.ready;
-      return cardHTML(c, faceUp, {});
+      return c ? cardHTML(c, faceUp, {}) : `<div class="card-slot empty">Empty</div>`;
     }).join('');
   }
  
@@ -1032,8 +1177,16 @@
     $('myNameLabel').textContent = me.name + ' (you)';
     $('oppNameLabel').textContent = opp.name;
  
-    $('myGridEl').innerHTML = me.cards.map((c,i)=>cardHTML(c, false, {owner:ME.slot, idx:i, clickable:isClickableCell(ME.slot,i)})).join('');
-    $('oppGridEl').innerHTML = opp.cards.map((c,i)=>cardHTML(c, false, {owner:1-ME.slot, idx:i, clickable:isClickableCell(1-ME.slot,i)})).join('');
+    $('myGridEl').innerHTML = me.cards.map((c,i)=>
+      c
+        ? cardHTML(c, false, {owner:ME.slot, idx:i, clickable:isClickableCell(ME.slot,i)})
+        : `<div class="card-slot empty" data-owner="${ME.slot}" data-idx="${i}">Empty</div>`
+    ).join('');
+    $('oppGridEl').innerHTML = opp.cards.map((c,i)=>
+      c
+        ? cardHTML(c, false, {owner:1-ME.slot, idx:i, clickable:isClickableCell(1-ME.slot,i)})
+        : `<div class="card-slot empty" data-owner="${1-ME.slot}" data-idx="${i}">Empty</div>`
+    ).join('');
  
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
     $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
@@ -1059,13 +1212,21 @@
     const rows = GAME.players.map(p=>{
       return `<div class="ro-player">
         <h3>${escapeHTML(p.name)}${p.slot===ME.slot?' (you)':''}</h3>
-        <div class="ro-grid">${p.cards.map(c=>`<div>${cardHTML(c,true)}<div class="ro-val">${cardValue(c)}</div></div>`).join('')}</div>
-        <div class="ro-total">Round total: ${p.roundTotal}</div>
+        <div class="ro-grid">${p.cards.filter(Boolean).map(c=>`<div>${cardHTML(c,true)}<div class="ro-val">${cardValue(c)}</div></div>`).join('')}</div>
+        <div class="ro-total">Cards held: ${activeCardCount(p)}${p.roundTotal !== undefined ? ` · Round total: ${p.roundTotal}` : ''}</div>
         <div class="ro-cumulative">Cumulative score: ${GAME.scores[p.slot]}</div>
       </div>`;
     }).join('');
     $('roundoverGrids').innerHTML = rows;
     const p0 = GAME.players[0], p1 = GAME.players[1];
+
+    if(GAME.forcedLoss && GAME.forcedLoss.reason === 'seven-cards'){
+      const loser = GAME.players[GAME.forcedLoss.loserSlot];
+      const winner = GAME.players[GAME.forcedLoss.winnerSlot];
+      $('roundoverWinner').textContent = `${loser.name} reached 7 cards and automatically lost. ${winner ? winner.name + ' wins!' : ''}`;
+      return;
+    }
+
     if(p0.roundTotal === p1.roundTotal){
       $('roundoverWinner').textContent = "It's a tie this round!";
     } else {
