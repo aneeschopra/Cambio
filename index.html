@@ -355,36 +355,55 @@
       <div id="peekOtherStatus" class="hint"></div>
     </div>
   </div>
- 
+
   <!-- MAIN GAME -->
   <div class="screen" id="screenGame">
     <div class="panel wide">
       <div class="cambio-notice" id="cambioNotice"></div>
       <div class="turn-banner" id="turnBanner"></div>
+
       <div class="top-play-area">
         <div class="table-row">
-        <div class="pile-wrap">
-          <div class="pile-label">Draw pile</div>
-          <div id="drawPileEl" data-motion-anchor="draw-pile"><div class="card-back" style="width:64px;height:92px;"></div></div>
-        <div class="turn-dynamic-area">
-        <div class="idle-action-note" id="idleActionNote">
-          Draw a card when it is your turn. At any time, click a face-down card to try matching the discard rank.
+          <div class="pile-wrap">
+            <div class="pile-label">Draw pile</div>
+            <div id="drawPileEl" data-motion-anchor="draw-pile">
+              <div class="card-back" style="width:64px;height:92px;"></div>
+            </div>
+            <div class="count"><span id="deckCount">0</span> left</div>
+          </div>
+
+          <div class="pile-wrap">
+            <div class="pile-label">Discard pile</div>
+            <div id="discardPileEl" data-motion-anchor="discard-pile"></div>
+          </div>
         </div>
-        <div class="drawn-card-area" id="drawnCardArea">
-        <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
-      </div>
-<div class="action-bar">
-          <button id="swapBtn">Swap into one of my cards</button>
-          <button id="discardBtn" class="secondary">Just discard it</button>
+
+        <div class="turn-dynamic-area">
+          <div class="idle-action-note" id="idleActionNote">
+            Draw a card when it is your turn. At any time, click a face-down card to try matching the discard rank.
+          </div>
+
+          <div class="drawn-card-area" id="drawnCardArea">
+            <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
+            <div class="action-bar">
+              <button id="swapBtn">Swap into one of my cards</button>
+              <button id="discardBtn" class="secondary">Just discard it</button>
+            </div>
+          </div>
+
+          <div class="power-bar" id="powerBar">
+            <p id="powerBarText"></p>
+            <button id="skipPowerBtn" class="secondary small">Skip power</button>
+          </div>
         </div>
       </div>
 
-        <div class="power-bar" id="powerBar">
-        <p id="powerBarText"></p>
-        <button id="skipPowerBtn" class="secondary small">Skip power</button>
+      <div class="action-bar">
+        <button id="drawBtn" style="display:none;">Draw Card</button>
+        <button id="cambioBtn" class="danger" style="display:none;">Call Cambio!</button>
       </div>
-      </div>
-<div class="grids-wrap" id="gameGridsWrap">
+
+      <div class="grids-wrap" id="gameGridsWrap">
         <div class="player-zone">
           <h3 id="myNameLabel"></h3>
           <div class="card-grid" id="myGridEl"></div>
@@ -395,9 +414,11 @@
         </div>
       </div>
     </div>
- 
+
     <div class="log-panel" id="gameLog"></div>
   </div>
+
+
  
   <!-- ROUND OVER -->
   <div class="screen" id="screenRoundover">
