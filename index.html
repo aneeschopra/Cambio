@@ -99,9 +99,6 @@
     width:64px; height:92px; border-radius:8px; position:relative;
     box-shadow:0 4px 10px rgba(0,0,0,.4);
   }
-65%{opacity:1; transform:translateY(2px) scale(1.02);}
-    100%{opacity:1; transform:translateY(0) scale(1);}
-  }
   .card-slot.empty{
     background:transparent; border:2px dashed rgba(244,236,218,.3); box-shadow:none;
     display:flex; align-items:center; justify-content:center; font-size:.65rem; color:rgba(244,236,218,.5);
@@ -379,25 +376,25 @@
  
 
   .toast-banner{
-  position:fixed;
-  top:18px;
-  right:18px;
-  z-index:100;
-  max-width:340px;
-  padding:11px 14px;
-  border-radius:10px;
-  background:#ffffff;
-  color:#111111;
-  border:1px solid rgba(0,0,0,.15);
-  box-shadow:0 10px 28px rgba(0,0,0,.22);
-  font-weight:600;
-  font-size:.86rem;
-  line-height:1.35;
-  opacity:0;
-  transform:translateY(-10px);
-  pointer-events:none;
-  transition:opacity .22s ease, transform .22s ease;
-}
+    position:fixed;
+    top:18px;
+    right:18px;
+    z-index:100;
+    max-width:340px;
+    padding:11px 14px;
+    border-radius:10px;
+    background:#8f3730;
+    color:var(--cream);
+    border:1px solid rgba(255,255,255,.22);
+    box-shadow:0 10px 28px rgba(0,0,0,.35);
+    font-weight:600;
+    font-size:.86rem;
+    line-height:1.35;
+    opacity:0;
+    transform:translateY(-10px);
+    pointer-events:none;
+    transition:opacity .22s ease, transform .22s ease;
+  }
   .toast-banner.show{
     opacity:1;
     transform:translateY(0);
@@ -1118,20 +1115,24 @@
         if(!old) return;
 
         fresh.players[ME.slot].cards[idx] = taken;
-        setMotion(fresh, {
-          card:taken,
-          from:'drawn-area',
-          to:{owner:ME.slot, idx},
-          visibility:'hidden'
-        });
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
         setMotion(fresh, {
-          card:old,
-          from:{owner:ME.slot, idx},
-          to:'discard-pile',
-          visibility:'public'
+          steps:[
+            {
+              card:taken,
+              from:'drawn-area',
+              to:{owner:ME.slot, idx},
+              visibility:'hidden'
+            },
+            {
+              card:old,
+              from:{owner:ME.slot, idx},
+              to:'discard-pile',
+              visibility:'public'
+            }
+          ]
         });
         fresh.log.push(`${fresh.players[ME.slot].name} used their turn to take ${cardLabel(taken)} from the discard pile and replace one of their cards. No power activated.`);
         completeTurn(fresh);
@@ -1148,20 +1149,24 @@
         if(!drawn) return;
         const old = fresh.players[ME.slot].cards[idx];
         fresh.players[ME.slot].cards[idx] = drawn;
-        setMotion(fresh, {
-          card: drawn,
-          from:'drawn-area',
-          to:{owner:ME.slot, idx},
-          visibility:'hidden'
-        });
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
         setMotion(fresh, {
-          card: old,
-          from:{owner:ME.slot, idx},
-          to:'discard-pile',
-          visibility:'public'
+          steps:[
+            {
+              card:drawn,
+              from:'drawn-area',
+              to:{owner:ME.slot, idx},
+              visibility:'hidden'
+            },
+            {
+              card:old,
+              from:{owner:ME.slot, idx},
+              to:'discard-pile',
+              visibility:'public'
+            }
+          ]
         });
         fresh.log.push(`${fresh.players[ME.slot].name} swapped in a new card and discarded ${cardLabel(old)}. Hand-discarded cards do not activate powers.`);
         completeTurn(fresh);
@@ -1309,120 +1314,147 @@
   }
 
   function animateCardBetween(fromRect, toRect, card, faceUp, destinationEl){
-    if(!fromRect || !toRect || !card){
-      if(destinationEl) destinationEl.style.visibility = '';
-      return;
+    return new Promise(resolve=>{
+      if(!fromRect || !toRect || !card){
+        if(destinationEl) destinationEl.style.visibility = '';
+        resolve();
+        return;
+      }
+
+      if(destinationEl){
+        destinationEl.style.visibility = 'hidden';
+      }
+
+      const clone = document.createElement('div');
+      clone.className = 'motion-card-clone';
+      clone.innerHTML = cardHTML(card, !!faceUp, {});
+      document.body.appendChild(clone);
+
+      const startLeft = fromRect.left + (fromRect.width - 64) / 2;
+      const startTop = fromRect.top + (fromRect.height - 92) / 2;
+      const endLeft = toRect.left + (toRect.width - 64) / 2;
+      const endTop = toRect.top + (toRect.height - 92) / 2;
+
+      clone.style.left = `${startLeft}px`;
+      clone.style.top = `${startTop}px`;
+
+      const dx = endLeft - startLeft;
+      const dy = endTop - startTop;
+
+      const finish = ()=>{
+        if(destinationEl){
+          destinationEl.style.visibility = '';
+        }
+        clone.remove();
+        resolve();
+      };
+
+      const animation = clone.animate([
+        {
+          transform:'translate(0,0)',
+          opacity:1
+        },
+        {
+          transform:`translate(${dx}px, ${dy}px)`,
+          opacity:1
+        }
+      ], {
+        duration:760,
+        easing:'cubic-bezier(.22,.75,.25,1)',
+        fill:'forwards'
+      });
+
+      animation.onfinish = finish;
+      animation.oncancel = finish;
+    });
+  }
+
+  function motionFaceUp(step, actorSlot){
+    if(step.visibility === 'active-only'){
+      return ME && ME.slot === actorSlot;
+    }
+    if(step.visibility === 'public'){
+      return true;
+    }
+    return false;
+  }
+
+  function resolveMotionTarget(step){
+    let destinationEl = null;
+    let toRect = null;
+
+    if(step.to === 'drawn-area'){
+      const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${step.card.id}"]`) : null;
+      toRect = anchor ? anchor.getBoundingClientRect() : null;
+    } else if(step.to === 'discard-pile'){
+      const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
+      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${step.card.id}"]`) : null;
+      toRect = anchor ? anchor.getBoundingClientRect() : null;
+    } else if(step.to && step.to.owner !== undefined){
+      destinationEl = playerCardElement(step.to.owner, step.to.idx);
+      toRect = destinationEl ? destinationEl.getBoundingClientRect() : null;
     }
 
-    // The real destination card has already been rendered by Firebase.
-    // Hide it while the clone travels so the user sees only one card.
+    return {destinationEl, toRect};
+  }
+
+  function resolveMotionSource(step){
+    if(step.from === 'draw-pile'){
+      return rectForSelector('[data-motion-anchor="draw-pile"]');
+    }
+    if(step.from === 'discard-pile'){
+      return rectForSelector('[data-motion-anchor="discard-pile"]');
+    }
+    if(step.from === 'drawn-area'){
+      return rectForSelector('[data-motion-anchor="drawn-card"]');
+    }
+    if(step.from && step.from.owner !== undefined){
+      const el = playerCardElement(step.from.owner, step.from.idx);
+      return el ? el.getBoundingClientRect() : null;
+    }
+    return null;
+  }
+
+  async function playMotionStep(step, actorSlot){
+    const {destinationEl, toRect} = resolveMotionTarget(step);
+
     if(destinationEl){
       destinationEl.style.visibility = 'hidden';
     }
 
-    const clone = document.createElement('div');
-    clone.className = 'motion-card-clone';
-    clone.innerHTML = cardHTML(card, !!faceUp, {});
-    document.body.appendChild(clone);
+    await new Promise(requestAnimationFrame);
 
-    const startLeft = fromRect.left + (fromRect.width - 64) / 2;
-    const startTop = fromRect.top + (fromRect.height - 92) / 2;
-    const endLeft = toRect.left + (toRect.width - 64) / 2;
-    const endTop = toRect.top + (toRect.height - 92) / 2;
+    const fromRect = resolveMotionSource(step);
+    const faceUp = motionFaceUp(step, actorSlot);
 
-    clone.style.left = `${startLeft}px`;
-    clone.style.top = `${startTop}px`;
-
-    const dx = endLeft - startLeft;
-    const dy = endTop - startTop;
-
-    const revealDestination = ()=>{
-      if(destinationEl){
-        destinationEl.style.visibility = '';
-      }
-      clone.remove();
-    };
-
-    const animation = clone.animate([
-      {
-        transform:'translate(0,0)',
-        opacity:1
-      },
-      {
-        transform:`translate(${dx}px, ${dy}px)`,
-        opacity:1
-      }
-    ], {
-      duration:760,
-      easing:'cubic-bezier(.22,.75,.25,1)',
-      fill:'forwards'
-    });
-
-    animation.onfinish = revealDestination;
-    animation.oncancel = revealDestination;
+    await animateCardBetween(
+      fromRect,
+      toRect,
+      step.card,
+      faceUp,
+      destinationEl
+    );
   }
 
-  function maybeAnimateLatestMotion(){
+  async function maybeAnimateLatestMotion(){
     if(!GAME || !GAME.motion || GAME.motion.id === lastSeenMotionId) return;
 
     const motion = GAME.motion;
     lastSeenMotionId = motion.id;
 
-    let destinationEl = null;
+    const steps = Array.isArray(motion.steps)
+      ? motion.steps
+      : [{
+          card:motion.card,
+          from:motion.from,
+          to:motion.to,
+          visibility:motion.visibility
+        }];
 
-    // Resolve and hide the real destination immediately, before the browser paints.
-    if(motion.to === 'drawn-area'){
-      const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
-      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
-    } else if(motion.to === 'discard-pile'){
-      const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
-      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
-    } else if(motion.to && motion.to.owner !== undefined){
-      destinationEl = playerCardElement(motion.to.owner, motion.to.idx);
+    for(const step of steps){
+      await playMotionStep(step, motion.actorSlot);
     }
-
-    if(destinationEl){
-      destinationEl.style.visibility = 'hidden';
-    }
-
-    requestAnimationFrame(()=>{
-      let fromRect = null;
-      let toRect = null;
-      let faceUp = false;
-
-      if(motion.from === 'draw-pile'){
-        fromRect = rectForSelector('[data-motion-anchor="draw-pile"]');
-      } else if(motion.from === 'discard-pile'){
-        fromRect = rectForSelector('[data-motion-anchor="discard-pile"]');
-      } else if(motion.from && motion.from.owner !== undefined){
-        const el = playerCardElement(motion.from.owner, motion.from.idx);
-        fromRect = el ? el.getBoundingClientRect() : null;
-      }
-
-      if(motion.to === 'drawn-area'){
-        const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
-        toRect = anchor ? anchor.getBoundingClientRect() : null;
-      } else if(motion.to === 'discard-pile'){
-        const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
-        toRect = anchor ? anchor.getBoundingClientRect() : null;
-      } else if(motion.to && motion.to.owner !== undefined){
-        toRect = destinationEl ? destinationEl.getBoundingClientRect() : null;
-      }
-
-      // Keep secrecy:
-      // - Active player sees their directly drawn card face up.
-      // - Waiting player sees the same animation face down.
-      // - Cards moving between player grids stay face down unless public.
-      if(motion.visibility === 'active-only'){
-        faceUp = ME && ME.slot === motion.actorSlot;
-      } else if(motion.visibility === 'public'){
-        faceUp = true;
-      } else {
-        faceUp = false;
-      }
-
-      animateCardBetween(fromRect, toRect, motion.card, faceUp, destinationEl);
-    });
   }
 
   // ---------- RENDER ----------
