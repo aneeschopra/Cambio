@@ -294,8 +294,10 @@
   .drawn-source-note{
     font-size:.78rem;
     color:var(--gold);
-    margin:0 0 7px;
+    margin:0 auto 7px;
     min-height:1em;
+    max-width:520px;
+    line-height:1.4;
   }
 
   .turn-banner{font-family:'Fraunces',serif; font-size:1.3rem; margin:6px 0 10px; text-align:center;}
@@ -334,27 +336,6 @@
     padding-left:13px;
     padding-right:13px;
   }
-  .power-bar{
-    display:block;
-    position:absolute;
-    left:20px;
-    right:0;
-    top:18px;
-    background:rgba(0,0,0,.25);
-    border:1px solid var(--gold-dim);
-    border-radius:10px;
-    padding:12px 16px;
-    text-align:center;
-    opacity:0;
-    visibility:hidden;
-    pointer-events:none;
-    transition:opacity .28s ease;
-  }
-  .power-bar.visible{
-    opacity:1;
-    visibility:visible;
-    pointer-events:auto;
-  }
   .idle-action-note{
     width:100%;
     max-width:460px;
@@ -375,9 +356,7 @@
       border-top:1px solid rgba(216,178,106,.2);
       padding:12px 0 0;
     }
-    .power-bar{left:0; top:18px;}
   }
-  .power-bar p{margin:0 0 10px; font-size:.9rem;}
  
   .log-panel{
     width:100%;
@@ -606,15 +585,10 @@
             <div class="drawn-source-note" id="drawnSourceNote"></div>
             <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
             <div class="action-bar">
-              <button id="swapBtn">Steal & swap</button>
+              <button id="swapBtn">Swap</button>
               <button id="discardBtn" class="secondary">Discard</button>
               <button id="usePowerBtn">Use power</button>
             </div>
-          </div>
-
-          <div class="power-bar" id="powerBar">
-            <p id="powerBarText"></p>
-            <button id="skipPowerBtn" class="secondary small">Skip power</button>
           </div>
         </div>
       </div>
@@ -757,11 +731,15 @@
     return null;
   }
   function powerInitialMode(p){
-    return {'7':'power-7','9':'power-9','JQ':'power-JQ-first','K':'power-K-look','KBLACK':'power-KB-own-look'}[p];
+    return {'7':'power-7','9':'power-9','JQ':'power-JQ-first','KBLACK':'power-KB-own-look'}[p];
   }
 
   function directlyDrawnPowerType(card){
     if(!card) return null;
+
+    if(card.rank==='7' || card.rank==='8') return '7';
+    if(card.rank==='9' || card.rank==='10') return '9';
+    if(card.rank==='J' || card.rank==='Q') return 'JQ';
 
     if(
       card.rank==='K' &&
@@ -770,7 +748,8 @@
       return 'KBLACK';
     }
 
-    return powerType(card.rank);
+    // Red Kings are worth -1 but have no power.
+    return null;
   }
   function powerInstruction(type, mode){
     if(type==='7') return "Power (7/8): click one of your opponent's face-down cards to peek at it.";
@@ -785,10 +764,15 @@
       if(mode==='power-KB-swap-second') return "Black King: choose the second card to complete the swap.";
       return "Black King power.";
     }
-    if(type==='K') return mode==='power-K-swap'
-      ? "Power (King): click one of your own cards to swap with the one you looked at, or skip."
-      : "Power (King): click any one face-down card to look at it.";
     return '';
+  }
+
+  function drawnPowerDescription(type){
+    if(type==='7') return "7 / 8 power: look at one of your opponent's cards.";
+    if(type==='9') return "9 / 10 power: look at one of your own cards.";
+    if(type==='JQ') return "Jack / Queen power: blind-swap any two cards on the table.";
+    if(type==='KBLACK') return "Black King power: look at one of your cards, then one opponent card, then optionally swap any two cards.";
+    return "";
   }
  
   function cardHTML(card, faceUp, opts){
@@ -1187,10 +1171,6 @@
           return myTurn &&
             GAME.turnState==='await_power' &&
             !(jqFirst && owner===jqFirst.owner && idx===jqFirst.idx);
-        case 'power-K-look':
-          return myTurn && GAME.turnState==='await_power';
-        case 'power-K-swap':
-          return myTurn && GAME.turnState==='await_power' && owner===ME.slot;
         case 'power-KB-own-look':
           return myTurn && GAME.turnState==='await_power' && owner===ME.slot;
         case 'power-KB-opp-look':
@@ -1445,35 +1425,7 @@
       selectMode=null;
       render();
       return;
-    }
-
-    if(selectMode==='power-K-look' && myTurn){
-      const card = GAME.players[owner].cards[idx];
-      kLookTarget = {owner, idx};
-      showPeekPopup(card, `You may swap this with one of your own cards.`, [
-        {label:'Swap with mine', action: ()=>{ hidePeekPopup(); selectMode='power-K-swap'; render(); }},
-        {label:'Keep as is', secondary:true, action: async ()=>{
-          hidePeekPopup();
-          await updateGame(fresh=>{ fresh.log.push(`${fresh.players[ME.slot].name} looked at a card (King) and kept things as is.`); completeTurn(fresh); });
-          selectMode=null; kLookTarget=null; render();
-        }}
-      ]);
-      return;
-    }
- 
-    if(selectMode==='power-K-swap' && myTurn){
-      if(owner!==ME.slot) return;
-      await updateGame(fresh=>{
-        const mine = fresh.players[ME.slot].cards[idx];
-        const target = fresh.players[kLookTarget.owner].cards[kLookTarget.idx];
-        fresh.players[ME.slot].cards[idx] = target;
-        fresh.players[kLookTarget.owner].cards[kLookTarget.idx] = mine;
-        setMotion(fresh, {
-          card:mine,
-          from:{owner:ME.slot, idx},
-          to:{owner:kLookTarget.owner, idx:kLookTarget.idx},
-          visibility:'hidden'
-        });
+    });
         fresh.log.push(`${fresh.players[ME.slot].name} swapped a card using the King's power.`);
         completeTurn(fresh);
       });
@@ -1827,13 +1779,19 @@
         {}
       );
 
-      $('drawnSourceNote').textContent = discardReplacementActive
-        ? (myTurn
-            ? 'Discard card taken — click one of your own cards to replace. This uses your whole turn.'
-            : `${GAME.players[GAME.turn].name} is replacing one of their cards with the discard.`)
-        : (myTurn
-            ? 'Card drawn from deck'
-            : `${GAME.players[GAME.turn].name} drew a card and is deciding what to do.`);
+      if(discardReplacementActive){
+        $('drawnSourceNote').textContent = myTurn
+          ? 'Discard card taken — click one of your own cards to replace. This uses your whole turn.'
+          : `${GAME.players[GAME.turn].name} is replacing one of their cards with the discard.`;
+      } else if(myTurn){
+        const decisionPowerType = directlyDrawnPowerType(GAME.drawnCard);
+        $('drawnSourceNote').textContent = decisionPowerType
+          ? drawnPowerDescription(decisionPowerType)
+          : 'Card drawn from deck';
+      } else {
+        $('drawnSourceNote').textContent =
+          `${GAME.players[GAME.turn].name} drew a card and is deciding what to do.`;
+      }
     } else {
       $('drawnSourceNote').textContent = '';
     }
@@ -1853,10 +1811,13 @@
         ? 'inline-block'
         : 'none';
  
-    const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
-    $('powerBar').classList.toggle('visible', !!showPower);
-    $('idleActionNote').style.display = (!showDrawn && !showPower) ? 'flex' : 'none';
-    if(showPower){ $('powerBarText').textContent = 'Optional — ' + powerInstruction(GAME.pendingPower.type, selectMode); }
+    const resolvingPower =
+      myTurn &&
+      GAME.turnState==='await_power' &&
+      GAME.pendingPower;
+
+    $('idleActionNote').style.display =
+      (!showDrawn && !resolvingPower) ? 'flex' : 'none';
  
     $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
     if(GAME.cambio){
@@ -2122,7 +2083,7 @@
         visibility:'public'
       });
 
-      fresh.log.push(`${fresh.players[ME.slot].name} discarded ${cardLabel(card)} without using its power.`);
+      fresh.log.push(`${fresh.players[ME.slot].name} discarded ${cardLabel(card)}.`);
       completeTurn(fresh);
     });
 
@@ -2168,15 +2129,6 @@
       selectMode=powerInitialMode(selectedPowerType);
       render();
     }
-  };
- 
-  $('skipPowerBtn').onclick = async ()=>{
-    await updateGame(fresh=>{
-      fresh.log.push(`${fresh.players[ME.slot].name} skipped the power.`);
-      completeTurn(fresh);
-    });
-    selectMode=null; jqFirst=null; kLookTarget=null; blackKingSwapFirst=null;
-    hidePeekPopup();
   };
  
   $('btnPlayAgain').onclick = async ()=>{
