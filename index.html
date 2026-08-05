@@ -323,11 +323,16 @@
     pointer-events:auto;
   }
   .idle-action-note{
-    max-width:420px;
+    width:100%;
+    max-width:460px;
+    min-height:64px;
+    align-items:center;
+    justify-content:center;
     text-align:center;
-    opacity:.7;
-    font-size:.84rem;
-    line-height:1.45;
+    opacity:1;
+  }
+  .idle-action-note button{
+    min-width:150px;
   }
   @media (max-width:760px){
     .top-play-area{grid-template-columns:1fr; gap:10px;}
@@ -505,8 +510,9 @@
         </div>
 
         <div class="turn-dynamic-area">
-          <div class="idle-action-note" id="idleActionNote">
-            Before drawing, you may click any face-down card to try matching the discard rank. After you draw, matching pauses for you until your turn action is fully finished; your opponent may still match.
+          <div class="idle-action-note action-bar" id="idleActionNote">
+            <button id="drawBtn" style="display:none;">Draw Card</button>
+            <button id="cambioBtn" class="danger" style="display:none;">Call Cambio!</button>
           </div>
 
           <div class="drawn-card-area" id="drawnCardArea">
@@ -525,10 +531,6 @@
         </div>
       </div>
 
-      <div class="action-bar">
-        <button id="drawBtn" style="display:none;">Draw Card</button>
-        <button id="cambioBtn" class="danger" style="display:none;">Call Cambio!</button>
-      </div>
 
       <div class="grids-wrap" id="gameGridsWrap">
         <div class="player-zone">
@@ -1306,8 +1308,14 @@
     return document.querySelector(`.card-slot[data-owner="${owner}"][data-idx="${idx}"]`);
   }
 
-  function animateCardBetween(fromRect, toRect, card, faceUp){
+  function animateCardBetween(fromRect, toRect, card, faceUp, destinationEl){
     if(!fromRect || !toRect || !card) return;
+
+    // The real destination card has already been rendered by Firebase.
+    // Hide it while the clone travels so the user sees only one card.
+    if(destinationEl){
+      destinationEl.style.visibility = 'hidden';
+    }
 
     const clone = document.createElement('div');
     clone.className = 'motion-card-clone';
@@ -1325,6 +1333,13 @@
     const dx = endLeft - startLeft;
     const dy = endTop - startTop;
 
+    const revealDestination = ()=>{
+      if(destinationEl){
+        destinationEl.style.visibility = '';
+      }
+      clone.remove();
+    };
+
     const animation = clone.animate([
       {
         transform:'translate(0,0)',
@@ -1340,8 +1355,8 @@
       fill:'forwards'
     });
 
-    animation.onfinish = ()=>clone.remove();
-    animation.oncancel = ()=>clone.remove();
+    animation.onfinish = revealDestination;
+    animation.oncancel = revealDestination;
   }
 
   function maybeAnimateLatestMotion(){
@@ -1353,6 +1368,7 @@
     requestAnimationFrame(()=>{
       let fromRect = null;
       let toRect = null;
+      let destinationEl = null;
       let faceUp = false;
 
       if(motion.from === 'draw-pile'){
@@ -1365,12 +1381,16 @@
       }
 
       if(motion.to === 'drawn-area'){
-        toRect = rectForSelector('[data-motion-anchor="drawn-card"]');
+        const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+        destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
+        toRect = anchor ? anchor.getBoundingClientRect() : null;
       } else if(motion.to === 'discard-pile'){
-        toRect = rectForSelector('[data-motion-anchor="discard-pile"]');
+        const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
+        destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
+        toRect = anchor ? anchor.getBoundingClientRect() : null;
       } else if(motion.to && motion.to.owner !== undefined){
-        const el = playerCardElement(motion.to.owner, motion.to.idx);
-        toRect = el ? el.getBoundingClientRect() : null;
+        destinationEl = playerCardElement(motion.to.owner, motion.to.idx);
+        toRect = destinationEl ? destinationEl.getBoundingClientRect() : null;
       }
 
       // Keep secrecy:
@@ -1386,7 +1406,7 @@
         faceUp = false;
       }
 
-      animateCardBetween(fromRect, toRect, motion.card, faceUp);
+      animateCardBetween(fromRect, toRect, motion.card, faceUp, destinationEl);
     });
   }
 
@@ -1442,7 +1462,7 @@
 
     $('discardPileEl').innerHTML = GAME.discard.length
       ? cardHTML(GAME.discard[GAME.discard.length-1], true)
-      : `<div class="card-slot empty"></div>`;
+      : `<div class="card-slot empty">Empty</div>`;
 
     $('discardPileEl').classList.toggle('pile-clickable', canTakeDiscard);
     $('discardPileEl').title = canTakeDiscard
@@ -1510,7 +1530,7 @@
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
     $('powerBar').classList.toggle('visible', !!showPower);
-    $('idleActionNote').style.display = (!showDrawn && !showPower) ? 'block' : 'none';
+    $('idleActionNote').style.display = (!showDrawn && !showPower) ? 'flex' : 'none';
     if(showPower){ $('powerBarText').textContent = 'Optional — ' + powerInstruction(GAME.pendingPower.type, selectMode); }
  
     $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
