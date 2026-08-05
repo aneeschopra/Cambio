@@ -98,7 +98,7 @@
   .card-slot{
     width:64px; height:92px; border-radius:8px; position:relative;
     box-shadow:0 4px 10px rgba(0,0,0,.4);
-    animation: pop-in .55s cubic-bezier(.22,.8,.3,1);
+    animation: pop-in .38s ease-out;
   }
   @keyframes pop-in{
     0%{opacity:0; transform:translateY(-12px) scale(.9);}
@@ -150,7 +150,22 @@
     align-items:start;
   }
  
-  .table-row{display:flex; gap:28px; align-items:center; justify-content:center; margin:10px 0 6px;}
+  .top-play-area{
+    display:grid;
+    grid-template-columns:minmax(220px, 300px) minmax(280px, 1fr);
+    gap:22px;
+    align-items:center;
+    width:100%;
+    margin:8px 0 12px;
+  }
+  .table-row{
+    display:flex;
+    gap:24px;
+    align-items:center;
+    justify-content:center;
+    margin:0;
+    min-height:132px;
+  }
   .pile-wrap{display:flex; flex-direction:column; align-items:center; gap:6px;}
   .pile-label{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); font-family:'JetBrains Mono',monospace;}
   .count{font-size:.75rem; color:var(--cream); opacity:.8;}
@@ -162,8 +177,13 @@
   .turn-dynamic-area{
     position:relative;
     width:100%;
-    height:176px;
-    margin:8px 0 2px;
+    height:142px;
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-left:1px solid rgba(216,178,106,.2);
+    padding-left:20px;
   }
   .drawn-card-area{
     display:block;
@@ -173,20 +193,20 @@
     opacity:0;
     visibility:hidden;
     pointer-events:none;
-    transition:opacity .3s ease;
+    transition:opacity .28s ease;
   }
   .drawn-card-area.visible{
     opacity:1;
     visibility:visible;
     pointer-events:auto;
   }
-  .drawn-card-area .card-slot{margin:0 auto 10px;}
+  .drawn-card-area .card-slot{margin:0 auto 8px;}
   .power-bar{
     display:block;
     position:absolute;
-    left:0;
+    left:20px;
     right:0;
-    top:28px;
+    top:18px;
     background:rgba(0,0,0,.25);
     border:1px solid var(--gold-dim);
     border-radius:10px;
@@ -195,12 +215,29 @@
     opacity:0;
     visibility:hidden;
     pointer-events:none;
-    transition:opacity .3s ease;
+    transition:opacity .28s ease;
   }
   .power-bar.visible{
     opacity:1;
     visibility:visible;
     pointer-events:auto;
+  }
+  .idle-action-note{
+    max-width:420px;
+    text-align:center;
+    opacity:.7;
+    font-size:.84rem;
+    line-height:1.45;
+  }
+  @media (max-width:760px){
+    .top-play-area{grid-template-columns:1fr; gap:10px;}
+    .turn-dynamic-area{
+      height:136px;
+      border-left:none;
+      border-top:1px solid rgba(216,178,106,.2);
+      padding:12px 0 0;
+    }
+    .power-bar{left:0; top:18px;}
   }
   .power-bar p{margin:0 0 10px; font-size:.9rem;}
  
@@ -324,31 +361,19 @@
     <div class="panel wide">
       <div class="cambio-notice" id="cambioNotice"></div>
       <div class="turn-banner" id="turnBanner"></div>
- 
-      <div class="table-row">
+      <div class="top-play-area">
+        <div class="table-row">
         <div class="pile-wrap">
           <div class="pile-label">Draw pile</div>
-          <div id="drawPileEl"><div class="card-back" style="width:64px;height:92px;"></div></div>
-          <div class="count"><span id="deckCount">0</span> left</div>
+          <div id="drawPileEl" data-motion-anchor="draw-pile"><div class="card-back" style="width:64px;height:92px;"></div></div>
+        <div class="turn-dynamic-area">
+        <div class="idle-action-note" id="idleActionNote">
+          Draw a card when it is your turn. At any time, click a face-down card to try matching the discard rank.
         </div>
-        <div class="pile-wrap">
-          <div class="pile-label">Discard pile</div>
-          <div id="discardPileEl"></div>
-        </div>
-      </div>
- 
-      <div class="action-bar">
-        <button id="drawBtn" style="display:none;">Draw Card</button>
-        <button id="cambioBtn" class="danger" style="display:none;">Call Cambio!</button>
-        <button id="snapBtn" class="secondary" style="display:none;">Play Matching Card</button>
-      </div>
-      <div class="hint" id="matchHint" style="text-align:center; display:none;">
-        Either player may play a face-down card matching the discard rank at any time. A wrong guess adds a penalty card and does not change the turn.
-      </div>
-      <div class="turn-dynamic-area">
         <div class="drawn-card-area" id="drawnCardArea">
-        <div id="drawnCardDisplay"></div>
-        <div class="action-bar">
+        <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
+      </div>
+<div class="action-bar">
           <button id="swapBtn">Swap into one of my cards</button>
           <button id="discardBtn" class="secondary">Just discard it</button>
         </div>
@@ -502,7 +527,9 @@
     opts = opts || {};
     const cls = ['card-slot'];
     if(opts.clickable) cls.push('clickable');
-    const dataAttrs = (opts.owner!==undefined && opts.owner!==null) ? ` data-owner="${opts.owner}" data-idx="${opts.idx}"` : '';
+    const ownerAttrs = (opts.owner!==undefined && opts.owner!==null) ? ` data-owner="${opts.owner}" data-idx="${opts.idx}"` : '';
+    const cardIdAttr = card && card.id ? ` data-card-id="${card.id}"` : '';
+    const dataAttrs = ownerAttrs + cardIdAttr;
     if(!faceUp){
       return `<div class="${cls.join(' ')}"${dataAttrs}><div class="card-back"></div></div>`;
     }
@@ -588,8 +615,10 @@
     });
 
     if (result.committed && result.snapshot.exists()) {
+      captureMotionRects();
       GAME = normalizeGameState(result.snapshot.val());
       render();
+      runMotionAnimations();
     }
 
     return result;
@@ -608,8 +637,10 @@
     const val = normalizeGameState(snap.val());
 
     if (val) {
+      captureMotionRects();
       GAME = val;
       render();
+      runMotionAnimations();
     }
   };
 
@@ -730,18 +761,21 @@
  
   // ---------- CLICK HANDLING ----------
   function isClickableCell(owner, idx){
-    if(!GAME || GAME.turn !== ME.slot) {
-      if(selectMode !== 'snap-select') return false;
-    }
+    if(!GAME || !ME || GAME.phase!=='playing') return false;
+
+    // When no power/swap action is active, every face-down card is a possible match attempt.
+    if(!selectMode) return true;
+
+    const myTurn = GAME.turn === ME.slot;
+
     switch(selectMode){
-      case 'swap-own': return owner===ME.slot;
-      case 'power-7': return owner!==ME.slot;
-      case 'power-9': return owner===ME.slot;
-      case 'power-JQ-first': return true;
-      case 'power-JQ-second': return !(jqFirst && owner===jqFirst.owner && idx===jqFirst.idx);
-      case 'power-K-look': return true;
-      case 'power-K-swap': return owner===ME.slot;
-      case 'snap-select': return true;
+      case 'swap-own': return myTurn && owner===ME.slot;
+      case 'power-7': return myTurn && owner!==ME.slot;
+      case 'power-9': return myTurn && owner===ME.slot;
+      case 'power-JQ-first': return myTurn;
+      case 'power-JQ-second': return myTurn && !(jqFirst && owner===jqFirst.owner && idx===jqFirst.idx);
+      case 'power-K-look': return myTurn;
+      case 'power-K-swap': return myTurn && owner===ME.slot;
       case 'snap-give': return owner===ME.slot;
       default: return false;
     }
@@ -844,13 +878,6 @@
       return;
     }
  
-    if(selectMode==='snap-select'){
-      await attemptSnap(owner, idx);
-      selectMode = (selectMode==='snap-give') ? selectMode : null;
-      render();
-      return;
-    }
- 
     if(selectMode==='snap-give'){
       if(owner!==ME.slot) return;
       await updateGame(fresh=>{
@@ -861,8 +888,87 @@
       selectMode=null; snapGiveTarget=null; render();
       return;
     }
+
+    // Unspoken matching rule: when no other card action is active,
+    // clicking any face-down card attempts to match the discard rank.
+    if(!selectMode && GAME.phase==='playing'){
+      await attemptSnap(owner, idx);
+      render();
+    }
   }
  
+
+  // ---------- CARD MOVEMENT ANIMATION ----------
+  let previousCardRects = new Map();
+  let previousAnchorRects = new Map();
+
+  function captureMotionRects(){
+    const cardRects = new Map();
+    document.querySelectorAll('[data-card-id]').forEach(el=>{
+      cardRects.set(el.dataset.cardId, el.getBoundingClientRect());
+    });
+
+    const anchorRects = new Map();
+    document.querySelectorAll('[data-motion-anchor]').forEach(el=>{
+      anchorRects.set(el.dataset.motionAnchor, el.getBoundingClientRect());
+    });
+
+    previousCardRects = cardRects;
+    previousAnchorRects = anchorRects;
+  }
+
+  function animateFromRect(el, fromRect, duration=700){
+    if(!el || !fromRect || !el.animate) return;
+    const toRect = el.getBoundingClientRect();
+    const dx = fromRect.left - toRect.left;
+    const dy = fromRect.top - toRect.top;
+    const sx = fromRect.width && toRect.width ? fromRect.width / toRect.width : 1;
+    const sy = fromRect.height && toRect.height ? fromRect.height / toRect.height : 1;
+
+    el.animate([
+      {
+        transform:`translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+        opacity:.7,
+        zIndex:20
+      },
+      {
+        transform:'translate(0, 0) scale(1, 1)',
+        opacity:1,
+        zIndex:20
+      }
+    ], {
+      duration,
+      easing:'cubic-bezier(.22,.75,.25,1)',
+      fill:'none'
+    });
+  }
+
+  function runMotionAnimations(){
+    requestAnimationFrame(()=>{
+      document.querySelectorAll('[data-card-id]').forEach(el=>{
+        const id = el.dataset.cardId;
+        const oldRect = previousCardRects.get(id);
+        if(oldRect){
+          animateFromRect(el, oldRect, 760);
+          return;
+        }
+
+        // Newly drawn cards visually travel from the draw pile.
+        const drawnContainer = el.closest('#drawnCardDisplay');
+        if(drawnContainer && previousAnchorRects.get('draw-pile')){
+          animateFromRect(el, previousAnchorRects.get('draw-pile'), 820);
+          return;
+        }
+
+        // Newly placed discard cards travel from their previous card location when possible.
+        const discardContainer = el.closest('#discardPileEl');
+        if(discardContainer && previousAnchorRects.get('drawn-card')){
+          animateFromRect(el, previousAnchorRects.get('drawn-card'), 760);
+        }
+      });
+    });
+  }
+
   // ---------- RENDER ----------
   function render(){
     if(!GAME || !ME){ showScreen('lobby'); return; }
@@ -910,9 +1016,6 @@
  
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
     $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
-    $('snapBtn').style.display = (GAME.discard.length>0) ? 'inline-block' : 'none';
-    $('matchHint').style.display = (GAME.discard.length>0) ? 'block' : 'none';
-    $('snapBtn').textContent = selectMode==='snap-select' ? 'Cancel Match' : 'Play Matching Card';
  
     const showDrawn = myTurn && GAME.turnState==='await_decide' && GAME.drawnCard;
     $('drawnCardArea').classList.toggle('visible', !!showDrawn);
@@ -920,6 +1023,7 @@
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
     $('powerBar').classList.toggle('visible', !!showPower);
+    $('idleActionNote').style.display = (!showDrawn && !showPower) ? 'block' : 'none';
     if(showPower){ $('powerBarText').textContent = powerInstruction(GAME.pendingPower.type, selectMode); }
  
     $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
@@ -1105,11 +1209,6 @@
       fresh.log.push(`${fresh.players[ME.slot].name} called Cambio!`);
       passTurnPlain(fresh);
     });
-  };
- 
-  $('snapBtn').onclick = ()=>{
-    selectMode = (selectMode==='snap-select') ? null : 'snap-select';
-    render();
   };
  
   $('swapBtn').onclick = ()=>{ selectMode = 'swap-own'; render(); };
