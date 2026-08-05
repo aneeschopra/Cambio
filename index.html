@@ -277,7 +277,7 @@
   .turn-dynamic-area{
     position:relative;
     width:100%;
-    height:142px;
+    height:172px;
     min-width:0;
     display:flex;
     align-items:center;
@@ -337,7 +337,7 @@
   @media (max-width:760px){
     .top-play-area{grid-template-columns:1fr; gap:10px;}
     .turn-dynamic-area{
-      height:136px;
+      height:166px;
       border-left:none;
       border-top:1px solid rgba(216,178,106,.2);
       padding:12px 0 0;
@@ -1309,7 +1309,10 @@
   }
 
   function animateCardBetween(fromRect, toRect, card, faceUp, destinationEl){
-    if(!fromRect || !toRect || !card) return;
+    if(!fromRect || !toRect || !card){
+      if(destinationEl) destinationEl.style.visibility = '';
+      return;
+    }
 
     // The real destination card has already been rendered by Firebase.
     // Hide it while the clone travels so the user sees only one card.
@@ -1365,10 +1368,26 @@
     const motion = GAME.motion;
     lastSeenMotionId = motion.id;
 
+    let destinationEl = null;
+
+    // Resolve and hide the real destination immediately, before the browser paints.
+    if(motion.to === 'drawn-area'){
+      const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
+    } else if(motion.to === 'discard-pile'){
+      const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
+      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
+    } else if(motion.to && motion.to.owner !== undefined){
+      destinationEl = playerCardElement(motion.to.owner, motion.to.idx);
+    }
+
+    if(destinationEl){
+      destinationEl.style.visibility = 'hidden';
+    }
+
     requestAnimationFrame(()=>{
       let fromRect = null;
       let toRect = null;
-      let destinationEl = null;
       let faceUp = false;
 
       if(motion.from === 'draw-pile'){
@@ -1382,22 +1401,18 @@
 
       if(motion.to === 'drawn-area'){
         const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
-        destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
         toRect = anchor ? anchor.getBoundingClientRect() : null;
       } else if(motion.to === 'discard-pile'){
         const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
-        destinationEl = anchor ? anchor.querySelector(`[data-card-id="${motion.card.id}"]`) : null;
         toRect = anchor ? anchor.getBoundingClientRect() : null;
       } else if(motion.to && motion.to.owner !== undefined){
-        destinationEl = playerCardElement(motion.to.owner, motion.to.idx);
         toRect = destinationEl ? destinationEl.getBoundingClientRect() : null;
       }
 
       // Keep secrecy:
       // - Active player sees their directly drawn card face up.
       // - Waiting player sees the same animation face down.
-      // - Cards moving between player grids stay face down unless the rules
-      //   already reveal that card to the viewer.
+      // - Cards moving between player grids stay face down unless public.
       if(motion.visibility === 'active-only'){
         faceUp = ME && ME.slot === motion.actorSlot;
       } else if(motion.visibility === 'public'){
