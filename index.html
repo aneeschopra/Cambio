@@ -519,8 +519,8 @@
             <div class="drawn-source-note" id="drawnSourceNote"></div>
             <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
             <div class="action-bar">
-              <button id="swapBtn">Swap into one of my cards</button>
-              <button id="discardBtn" class="secondary">Just discard it</button>
+              <button id="swapBtn">Steal & swap</button>
+              <button id="discardBtn" class="secondary">Discard</button>
             </div>
           </div>
 
@@ -1477,7 +1477,7 @@
 
     $('discardPileEl').innerHTML = GAME.discard.length
       ? cardHTML(GAME.discard[GAME.discard.length-1], true)
-      : `<div class="card-slot empty">Empty</div>`;
+      : `<div class="card-slot empty"></div>`;
 
     $('discardPileEl').classList.toggle('pile-clickable', canTakeDiscard);
     $('discardPileEl').title = canTakeDiscard
