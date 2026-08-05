@@ -23,8 +23,7 @@
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;height:100%;}
   body{
-    background:
-      radial-gradient(circle at 50% -10%, var(--felt-light) 0%, var(--felt) 45%, var(--felt-dark) 100%);
+    background: var(--felt);
     color:var(--cream);
     font-family:'Inter',sans-serif;
     min-height:100vh;
@@ -49,7 +48,11 @@
   .tagline{color:var(--gold); font-size:.8rem; letter-spacing:.18em; text-transform:uppercase; font-family:'JetBrains Mono',monospace; margin-bottom:28px; opacity:.85;}
  
   .panel{
-    background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+    background:
+    radial-gradient(circle at top,
+        rgba(255,255,255,.06),
+        rgba(255,255,255,.02) 35%,
+        rgba(0,0,0,.12) 100%);
     border:1px solid rgba(216,178,106,.35);
     border-radius:18px;
     padding:28px 26px;
