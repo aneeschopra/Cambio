@@ -131,8 +131,21 @@
 100%{opacity:1; transform:translateY(0);}
   }
  
-  .grids-wrap{display:flex; gap:26px; flex-wrap:wrap; justify-content:center; width:100%; margin:18px 0;}
-  .player-zone{flex:1; min-width:230px; background:rgba(0,0,0,.18); border-radius:14px; padding:14px; border:1px solid rgba(216,178,106,.2);}
+  .grids-wrap{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:26px;
+    width:100%;
+    margin:18px 0;
+    align-items:start;
+  }
+  .player-zone{
+    min-width:0;
+    background:rgba(0,0,0,.18);
+    border-radius:14px;
+    padding:14px;
+    border:1px solid rgba(216,178,106,.2);
+  }
   .player-zone h3{font-size:1rem; color:var(--gold); margin-bottom:10px; font-family:'Inter',sans-serif; font-weight:700;}
   .card-grid{
     display:grid;
@@ -159,6 +172,14 @@
     width:100%;
     margin:8px 0 12px;
   }
+
+  @media (max-width:700px){
+    .grids-wrap{
+      grid-template-columns:1fr;
+      gap:14px;
+    }
+  }
+
   .table-row{
     display:flex;
     gap:24px;
@@ -168,6 +189,40 @@
     min-height:132px;
   }
   .pile-wrap{display:flex; flex-direction:column; align-items:center; gap:6px;}
+
+  .discard-placeholder{
+    position:relative;
+    width:64px;
+    height:92px;
+    border:2px dashed rgba(216,178,106,.65);
+    border-radius:8px;
+    background:rgba(0,0,0,.08);
+    box-shadow:none;
+  }
+  .discard-placeholder::before{
+    content:'↓';
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:var(--gold);
+    font-size:1.5rem;
+    opacity:.8;
+  }
+  .discard-placeholder::after{
+    content:'discard';
+    position:absolute;
+    left:50%;
+    bottom:8px;
+    transform:translateX(-50%);
+    color:rgba(244,236,218,.68);
+    font-size:.55rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    font-family:'JetBrains Mono',monospace;
+  }
+
   .pile-label{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); font-family:'JetBrains Mono',monospace;}
   .count{font-size:.75rem; color:var(--cream); opacity:.8;}
  
@@ -1254,21 +1309,24 @@
     clone.innerHTML = cardHTML(card, !!faceUp, {});
     document.body.appendChild(clone);
 
-    clone.style.left = `${fromRect.left}px`;
-    clone.style.top = `${fromRect.top}px`;
+    const startLeft = fromRect.left + (fromRect.width - 64) / 2;
+    const startTop = fromRect.top + (fromRect.height - 92) / 2;
+    const endLeft = toRect.left + (toRect.width - 64) / 2;
+    const endTop = toRect.top + (toRect.height - 92) / 2;
 
-    const dx = toRect.left - fromRect.left;
-    const dy = toRect.top - fromRect.top;
-    const sx = toRect.width && fromRect.width ? toRect.width / fromRect.width : 1;
-    const sy = toRect.height && fromRect.height ? toRect.height / fromRect.height : 1;
+    clone.style.left = `${startLeft}px`;
+    clone.style.top = `${startTop}px`;
+
+    const dx = endLeft - startLeft;
+    const dy = endTop - startTop;
 
     const animation = clone.animate([
       {
-        transform:'translate(0,0) scale(1,1)',
+        transform:'translate(0,0)',
         opacity:1
       },
       {
-        transform:`translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+        transform:`translate(${dx}px, ${dy}px)`,
         opacity:1
       }
     ], {
@@ -1351,7 +1409,7 @@
     $('peekOtherStatus').textContent = opp ? (opp.ready ? `${opp.name} is ready.` : `Waiting for ${opp.name}…`) : '';
     $('peekGrid').innerHTML = me.cards.map((c,i)=>{
       const faceUp = (i>=2) && !me.ready;
-      return c ? cardHTML(c, faceUp, {}) : `<div class="card-slot empty">Empty</div>`;
+      return c ? cardHTML(c, faceUp, {}) : `<div class="discard-placeholder" aria-label="No discard yet"></div>`;
     }).join('');
   }
  
