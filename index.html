@@ -98,11 +98,8 @@
   .card-slot{
     width:64px; height:92px; border-radius:8px; position:relative;
     box-shadow:0 4px 10px rgba(0,0,0,.4);
-    animation: pop-in .38s ease-out;
   }
-  @keyframes pop-in{
-    0%{opacity:0; transform:translateY(-12px) scale(.9);}
-    65%{opacity:1; transform:translateY(2px) scale(1.02);}
+65%{opacity:1; transform:translateY(2px) scale(1.02);}
     100%{opacity:1; transform:translateY(0) scale(1);}
   }
   .card-slot.empty{
@@ -111,7 +108,6 @@
   }
   .card-back{
     width:100%; height:100%; border-radius:8px;
-    animation:card-settle .55s cubic-bezier(.22,.8,.3,1);
     background:
       repeating-linear-gradient(45deg, var(--felt) 0, var(--felt) 6px, var(--felt-light) 6px, var(--felt-light) 12px);
     border:2px solid var(--gold-dim);
@@ -123,7 +119,6 @@
   }
   .card-face{
     width:100%; height:100%; border-radius:8px; background:var(--card-bg);
-    animation:card-settle .55s cubic-bezier(.22,.8,.3,1);
     border:2px solid #d9cdb0; display:flex; flex-direction:column; justify-content:space-between;
     padding:6px; color:var(--ink); font-family:'JetBrains Mono',monospace;
   }
@@ -133,9 +128,7 @@
   .card-face.black{color:var(--ink);}
   .card-slot.clickable{cursor:pointer; outline:2px solid var(--gold); outline-offset:2px; animation: pulse 1.4s infinite;}
   @keyframes pulse{0%,100%{box-shadow:0 4px 10px rgba(0,0,0,.4), 0 0 0 0 rgba(216,178,106,.6);} 50%{box-shadow:0 4px 10px rgba(0,0,0,.4), 0 0 0 6px rgba(216,178,106,0);}}
-  @keyframes card-settle{
-    0%{opacity:.25; transform:translateY(-10px);}
-    100%{opacity:1; transform:translateY(0);}
+100%{opacity:1; transform:translateY(0);}
   }
  
   .grids-wrap{display:flex; gap:26px; flex-wrap:wrap; justify-content:center; width:100%; margin:18px 0;}
@@ -178,6 +171,26 @@
   .pile-label{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); font-family:'JetBrains Mono',monospace;}
   .count{font-size:.75rem; color:var(--cream); opacity:.8;}
  
+
+
+  .motion-card-clone{
+    position:fixed;
+    z-index:999;
+    width:64px;
+    height:92px;
+    pointer-events:none;
+    transform-origin:top left;
+    will-change:transform, opacity;
+  }
+  .motion-card-clone .card-slot{
+    width:64px;
+    height:92px;
+    animation:none !important;
+  }
+  .motion-card-clone .card-back,
+  .motion-card-clone .card-face{
+    animation:none !important;
+  }
 
   .pile-clickable{
     cursor:pointer;
@@ -664,6 +677,7 @@
   state.scores = state.scores || { 0: 0, 1: 0 };
   state.snapEnabled = true;
   if(state.drawnSource === undefined) state.drawnSource = null;
+  if(state.motion === undefined) state.motion = null;
 
   return state;
 }
@@ -700,10 +714,9 @@
 
     if (result.committed && result.snapshot.exists()) {
       const previousPenaltyAt = GAME && GAME.lastPenalty ? GAME.lastPenalty.at : null;
-      captureMotionRects();
       GAME = normalizeGameState(result.snapshot.val());
       render();
-      runMotionAnimations();
+      maybeAnimateLatestMotion();
 
       if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
         if(GAME.lastPenalty.playerSlot === ME.slot){
@@ -732,10 +745,9 @@
 
     if (val) {
       const previousPenaltyAt = GAME && GAME.lastPenalty ? GAME.lastPenalty.at : null;
-      captureMotionRects();
       GAME = val;
       render();
-      runMotionAnimations();
+      maybeAnimateLatestMotion();
 
       if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
         const penalized = GAME.players[GAME.lastPenalty.playerSlot];
@@ -820,12 +832,26 @@
     return true;
   }
 
+  function setMotion(state, details){
+    state.motion = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      actorSlot: ME ? ME.slot : null,
+      ...details
+    };
+  }
+
   function givePenaltyCard(state, playerSlot){
     if(state.deck.length===0) reshuffleDiscardIntoDeck(state);
     const penalty = state.deck.length ? state.deck.pop() : null;
     if(!penalty) return false;
 
-    addCardToStableSlot(state.players[playerSlot], penalty);
+    const targetIdx = addCardToStableSlot(state.players[playerSlot], penalty);
+    setMotion(state, {
+      card:penalty,
+      from:'draw-pile',
+      to:{owner:playerSlot, idx:targetIdx},
+      visibility:'hidden'
+    });
     state.lastPenalty = {
       playerSlot,
       at: Date.now(),
@@ -918,6 +944,12 @@
       if(target.rank === top.rank){
         removeCardFromStableSlot(fresh.players[owner], idx);
         fresh.discard.push(target);
+        setMotion(fresh, {
+          card:target,
+          from:{owner, idx},
+          to:'discard-pile',
+          visibility:'public'
+        });
         fresh.log.push(`${me} played a matching ${cardLabel(target)} without using a turn.`);
         if(owner !== ME.slot) needGive = true;
       } else {
@@ -1024,9 +1056,21 @@
         if(!old) return;
 
         fresh.players[ME.slot].cards[idx] = taken;
+        setMotion(fresh, {
+          card:taken,
+          from:'drawn-area',
+          to:{owner:ME.slot, idx},
+          visibility:'hidden'
+        });
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
+        setMotion(fresh, {
+          card:old,
+          from:{owner:ME.slot, idx},
+          to:'discard-pile',
+          visibility:'public'
+        });
         fresh.log.push(`${fresh.players[ME.slot].name} used their turn to take ${cardLabel(taken)} from the discard pile and replace one of their cards. No power activated.`);
         completeTurn(fresh);
       });
@@ -1042,9 +1086,21 @@
         if(!drawn) return;
         const old = fresh.players[ME.slot].cards[idx];
         fresh.players[ME.slot].cards[idx] = drawn;
+        setMotion(fresh, {
+          card: drawn,
+          from:'drawn-area',
+          to:{owner:ME.slot, idx},
+          visibility:'hidden'
+        });
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
+        setMotion(fresh, {
+          card: old,
+          from:{owner:ME.slot, idx},
+          to:'discard-pile',
+          visibility:'public'
+        });
         fresh.log.push(`${fresh.players[ME.slot].name} swapped in a new card and discarded ${cardLabel(old)}. Hand-discarded cards do not activate powers.`);
         completeTurn(fresh);
       });
@@ -1094,6 +1150,12 @@
         const b = fresh.players[owner].cards[idx];
         fresh.players[jqFirst.owner].cards[jqFirst.idx] = b;
         fresh.players[owner].cards[idx] = a;
+        setMotion(fresh, {
+          card:a,
+          from:{owner:jqFirst.owner, idx:jqFirst.idx},
+          to:{owner, idx},
+          visibility:'hidden'
+        });
         fresh.log.push(`${fresh.players[ME.slot].name} blind-swapped two cards on the table.`);
         completeTurn(fresh);
       });
@@ -1122,6 +1184,12 @@
         const target = fresh.players[kLookTarget.owner].cards[kLookTarget.idx];
         fresh.players[ME.slot].cards[idx] = target;
         fresh.players[kLookTarget.owner].cards[kLookTarget.idx] = mine;
+        setMotion(fresh, {
+          card:mine,
+          from:{owner:ME.slot, idx},
+          to:{owner:kLookTarget.owner, idx:kLookTarget.idx},
+          visibility:'hidden'
+        });
         fresh.log.push(`${fresh.players[ME.slot].name} swapped a card using the King's power.`);
         completeTurn(fresh);
       });
@@ -1134,7 +1202,13 @@
       await updateGame(fresh=>{
         const card = removeCardFromStableSlot(fresh.players[ME.slot], idx);
         if(!card) return;
-        addCardToStableSlot(fresh.players[snapGiveTarget], card);
+        const targetIdx = addCardToStableSlot(fresh.players[snapGiveTarget], card);
+        setMotion(fresh, {
+          card,
+          from:{owner:ME.slot, idx},
+          to:{owner:snapGiveTarget, idx:targetIdx},
+          visibility:'hidden'
+        });
         fresh.log.push(`${fresh.players[ME.slot].name} handed a card to ${fresh.players[snapGiveTarget].name}.`);
         enforceSevenCardLoss(fresh);
       });
@@ -1160,74 +1234,96 @@
   }
  
 
-  // ---------- CARD MOVEMENT ANIMATION ----------
-  let previousCardRects = new Map();
-  let previousAnchorRects = new Map();
+  // ---------- TARGETED CARD MOVEMENT ANIMATION ----------
+  let lastSeenMotionId = null;
 
-  function captureMotionRects(){
-    const cardRects = new Map();
-    document.querySelectorAll('[data-card-id]').forEach(el=>{
-      cardRects.set(el.dataset.cardId, el.getBoundingClientRect());
-    });
-
-    const anchorRects = new Map();
-    document.querySelectorAll('[data-motion-anchor]').forEach(el=>{
-      anchorRects.set(el.dataset.motionAnchor, el.getBoundingClientRect());
-    });
-
-    previousCardRects = cardRects;
-    previousAnchorRects = anchorRects;
+  function rectForSelector(selector){
+    const el = document.querySelector(selector);
+    return el ? el.getBoundingClientRect() : null;
   }
 
-  function animateFromRect(el, fromRect, duration=700){
-    if(!el || !fromRect || !el.animate) return;
-    const toRect = el.getBoundingClientRect();
-    const dx = fromRect.left - toRect.left;
-    const dy = fromRect.top - toRect.top;
-    const sx = fromRect.width && toRect.width ? fromRect.width / toRect.width : 1;
-    const sy = fromRect.height && toRect.height ? fromRect.height / toRect.height : 1;
+  function playerCardElement(owner, idx){
+    return document.querySelector(`.card-slot[data-owner="${owner}"][data-idx="${idx}"]`);
+  }
 
-    el.animate([
+  function animateCardBetween(fromRect, toRect, card, faceUp){
+    if(!fromRect || !toRect || !card) return;
+
+    const clone = document.createElement('div');
+    clone.className = 'motion-card-clone';
+    clone.innerHTML = cardHTML(card, !!faceUp, {});
+    document.body.appendChild(clone);
+
+    clone.style.left = `${fromRect.left}px`;
+    clone.style.top = `${fromRect.top}px`;
+
+    const dx = toRect.left - fromRect.left;
+    const dy = toRect.top - fromRect.top;
+    const sx = toRect.width && fromRect.width ? toRect.width / fromRect.width : 1;
+    const sy = toRect.height && fromRect.height ? toRect.height / fromRect.height : 1;
+
+    const animation = clone.animate([
       {
-        transform:`translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
-        opacity:.7,
-        zIndex:20
+        transform:'translate(0,0) scale(1,1)',
+        opacity:1
       },
       {
-        transform:'translate(0, 0) scale(1, 1)',
-        opacity:1,
-        zIndex:20
+        transform:`translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+        opacity:1
       }
     ], {
-      duration,
+      duration:760,
       easing:'cubic-bezier(.22,.75,.25,1)',
-      fill:'none'
+      fill:'forwards'
     });
+
+    animation.onfinish = ()=>clone.remove();
+    animation.oncancel = ()=>clone.remove();
   }
 
-  function runMotionAnimations(){
+  function maybeAnimateLatestMotion(){
+    if(!GAME || !GAME.motion || GAME.motion.id === lastSeenMotionId) return;
+
+    const motion = GAME.motion;
+    lastSeenMotionId = motion.id;
+
     requestAnimationFrame(()=>{
-      document.querySelectorAll('[data-card-id]').forEach(el=>{
-        const id = el.dataset.cardId;
-        const oldRect = previousCardRects.get(id);
-        if(oldRect){
-          animateFromRect(el, oldRect, 760);
-          return;
-        }
+      let fromRect = null;
+      let toRect = null;
+      let faceUp = false;
 
-        // Newly drawn cards visually travel from the draw pile.
-        const drawnContainer = el.closest('#drawnCardDisplay');
-        if(drawnContainer && previousAnchorRects.get('draw-pile')){
-          animateFromRect(el, previousAnchorRects.get('draw-pile'), 820);
-          return;
-        }
+      if(motion.from === 'draw-pile'){
+        fromRect = rectForSelector('[data-motion-anchor="draw-pile"]');
+      } else if(motion.from === 'discard-pile'){
+        fromRect = rectForSelector('[data-motion-anchor="discard-pile"]');
+      } else if(motion.from && motion.from.owner !== undefined){
+        const el = playerCardElement(motion.from.owner, motion.from.idx);
+        fromRect = el ? el.getBoundingClientRect() : null;
+      }
 
-        // Newly placed discard cards travel from their previous card location when possible.
-        const discardContainer = el.closest('#discardPileEl');
-        if(discardContainer && previousAnchorRects.get('drawn-card')){
-          animateFromRect(el, previousAnchorRects.get('drawn-card'), 760);
-        }
-      });
+      if(motion.to === 'drawn-area'){
+        toRect = rectForSelector('[data-motion-anchor="drawn-card"]');
+      } else if(motion.to === 'discard-pile'){
+        toRect = rectForSelector('[data-motion-anchor="discard-pile"]');
+      } else if(motion.to && motion.to.owner !== undefined){
+        const el = playerCardElement(motion.to.owner, motion.to.idx);
+        toRect = el ? el.getBoundingClientRect() : null;
+      }
+
+      // Keep secrecy:
+      // - Active player sees their directly drawn card face up.
+      // - Waiting player sees the same animation face down.
+      // - Cards moving between player grids stay face down unless the rules
+      //   already reveal that card to the viewer.
+      if(motion.visibility === 'active-only'){
+        faceUp = ME && ME.slot === motion.actorSlot;
+      } else if(motion.visibility === 'public'){
+        faceUp = true;
+      } else {
+        faceUp = false;
+      }
+
+      animateCardBetween(fromRect, toRect, motion.card, faceUp);
     });
   }
 
@@ -1308,32 +1404,46 @@
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
     $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
  
-    const showDeckDecision =
-      myTurn &&
+    const deckDecisionActive =
       GAME.turnState === 'await_decide' &&
       GAME.drawnCard &&
       GAME.drawnSource === 'deck';
 
-    const showDiscardReplacement =
-      myTurn &&
+    const discardReplacementActive =
       GAME.turnState === 'await_discard_swap' &&
       GAME.drawnCard &&
       GAME.drawnSource === 'discard';
 
-    const showDrawn = showDeckDecision || showDiscardReplacement;
+    const showDrawn = deckDecisionActive || discardReplacementActive;
     $('drawnCardArea').classList.toggle('visible', !!showDrawn);
 
     if(showDrawn){
-      $('drawnCardDisplay').innerHTML = cardHTML(GAME.drawnCard, true);
-      $('drawnSourceNote').textContent = showDiscardReplacement
-        ? 'Discard card taken — click one of your own cards to replace. This uses your whole turn.'
-        : 'Card drawn from deck';
+      const viewerMaySeeFace =
+        myTurn ||
+        discardReplacementActive; // discard pile card was already public
+
+      $('drawnCardDisplay').innerHTML = cardHTML(
+        GAME.drawnCard,
+        viewerMaySeeFace,
+        {}
+      );
+
+      $('drawnSourceNote').textContent = discardReplacementActive
+        ? (myTurn
+            ? 'Discard card taken — click one of your own cards to replace. This uses your whole turn.'
+            : `${GAME.players[GAME.turn].name} is replacing one of their cards with the discard.`)
+        : (myTurn
+            ? 'Card drawn from deck'
+            : `${GAME.players[GAME.turn].name} drew a card and is deciding what to do.`);
     } else {
       $('drawnSourceNote').textContent = '';
     }
 
-    $('swapBtn').style.display = showDeckDecision ? 'inline-block' : 'none';
-    $('discardBtn').style.display = showDeckDecision ? 'inline-block' : 'none';
+    $('swapBtn').style.display =
+      (myTurn && deckDecisionActive) ? 'inline-block' : 'none';
+
+    $('discardBtn').style.display =
+      (myTurn && deckDecisionActive) ? 'inline-block' : 'none';
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
     $('powerBar').classList.toggle('visible', !!showPower);
@@ -1410,7 +1520,7 @@
             room, snapEnabled:true, phase:'lobby',
             players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
             deck:[], discard:[], turn:0, turnState:null,
-            drawnCard:null, drawnSource:null, pendingPower:null, cambio:null,
+            drawnCard:null, drawnSource:null, pendingPower:null, cambio:null, motion:null,
             log:[`${name} created the room.`],
             scores:{0:0,1:0}, round:0
           };
@@ -1537,6 +1647,12 @@
       const card = fresh.discard.pop();
       fresh.drawnCard = card;
       fresh.drawnSource = 'discard';
+      setMotion(fresh, {
+        card,
+        from:'discard-pile',
+        to:'drawn-area',
+        visibility:'public'
+      });
       fresh.turnState = 'await_discard_swap';
       fresh.pendingPower = null;
       fresh.log.push(`${fresh.players[ME.slot].name} picked up the top discard and must replace one of their cards.`);
@@ -1554,6 +1670,12 @@
       const card = fresh.deck.pop();
       fresh.drawnCard = card;
       fresh.drawnSource = 'deck';
+      setMotion(fresh, {
+        card,
+        from:'draw-pile',
+        to:'drawn-area',
+        visibility:'active-only'
+      });
       fresh.turnState = 'await_decide';
       fresh.log.push(`${fresh.players[ME.slot].name} drew a card.`);
     });
@@ -1579,6 +1701,12 @@
       fresh.drawnCard = null;
       fresh.drawnSource = null;
       fresh.discard.push(card);
+      setMotion(fresh, {
+        card,
+        from:'drawn-area',
+        to:'discard-pile',
+        visibility:'public'
+      });
       fresh.log.push(`${fresh.players[ME.slot].name} directly discarded ${cardLabel(card)} from the draw. ${
         powerType(card.rank) ? 'They may use or skip its power.' : ''
       }`);
