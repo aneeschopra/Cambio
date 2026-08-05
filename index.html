@@ -1317,6 +1317,12 @@
     return new Promise(resolve=>{
       if(!fromRect || !toRect || !card){
         if(destinationEl) destinationEl.style.visibility = '';
+
+        const drawnAnchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+        if(drawnAnchor){
+          drawnAnchor.style.visibility = '';
+        }
+
         resolve();
         return;
       }
@@ -1345,6 +1351,12 @@
         if(destinationEl){
           destinationEl.style.visibility = '';
         }
+
+        const drawnAnchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+        if(drawnAnchor){
+          drawnAnchor.style.visibility = '';
+        }
+
         clone.remove();
         resolve();
       };
@@ -1385,7 +1397,9 @@
 
     if(step.to === 'drawn-area'){
       const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
-      destinationEl = anchor ? anchor.querySelector(`[data-card-id="${step.card.id}"]`) : null;
+      destinationEl = anchor
+        ? (anchor.querySelector(`[data-card-id="${step.card.id}"]`) || anchor)
+        : null;
       toRect = anchor ? anchor.getBoundingClientRect() : null;
     } else if(step.to === 'discard-pile'){
       const anchor = document.querySelector('[data-motion-anchor="discard-pile"]');
@@ -1421,6 +1435,16 @@
 
     if(destinationEl){
       destinationEl.style.visibility = 'hidden';
+
+      // When drawing from the deck into the decision area, also hide any
+      // already-rendered child card so there is only one visible card:
+      // the moving animation clone.
+      if(step.to === 'drawn-area'){
+        const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+        if(anchor){
+          anchor.style.visibility = 'hidden';
+        }
+      }
     }
 
     await new Promise(requestAnimationFrame);
@@ -1435,6 +1459,13 @@
       faceUp,
       destinationEl
     );
+
+    if(step.to === 'drawn-area'){
+      const anchor = document.querySelector('[data-motion-anchor="drawn-card"]');
+      if(anchor){
+        anchor.style.visibility = '';
+      }
+    }
   }
 
   async function maybeAnimateLatestMotion(){
