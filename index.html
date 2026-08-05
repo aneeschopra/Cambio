@@ -471,10 +471,26 @@
     opacity:.58;
   }
   a.linklike{color:var(--gold);}
+
+  .creator-credit{
+    position:fixed;
+    top:12px;
+    left:16px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    letter-spacing:.08em;
+    color:rgba(255,255,255,.55);
+    z-index:1000;
+    pointer-events:none;
+    user-select:none;
+}
+  
 </style>
 </head>
 <body>
- 
+
+  <div class="creator-credit">© Created by Anees Chopra</div>
+  
   <div class="wordmark">CAMB<span class="pip">◆</span>O</div>
   <div class="tagline">a two-player card duel</div>
  
