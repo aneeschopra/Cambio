@@ -329,6 +329,11 @@
     pointer-events:auto;
   }
   .drawn-card-area .card-slot{margin:0 auto 8px;}
+  .drawn-card-area .action-bar{gap:8px;}
+  .drawn-card-area .action-bar button{
+    padding-left:13px;
+    padding-right:13px;
+  }
   .power-bar{
     display:block;
     position:absolute;
@@ -474,12 +479,12 @@
 
   .creator-credit{
     position:fixed;
-    top:14px;
-    left:18px;
+    top:12px;
+    left:16px;
     font-family:'JetBrains Mono', monospace;
     font-size:12px;
     letter-spacing:.08em;
-    color:rgba(255,255,255,.65);
+    color:rgba(255,255,255,.80);
     z-index:1000;
     pointer-events:none;
     user-select:none;
@@ -603,6 +608,7 @@
             <div class="action-bar">
               <button id="swapBtn">Steal & swap</button>
               <button id="discardBtn" class="secondary">Discard</button>
+              <button id="usePowerBtn">Use power</button>
             </div>
           </div>
 
@@ -693,6 +699,7 @@
   let selectMode = null; // current local interaction mode
   let jqFirst = null;
   let kLookTarget = null;
+  let blackKingSwapFirst = null;
   let snapGiveTarget = null;
  
   // ---------- DOM ----------
@@ -750,7 +757,20 @@
     return null;
   }
   function powerInitialMode(p){
-    return {'7':'power-7','9':'power-9','JQ':'power-JQ-first','K':'power-K-look'}[p];
+    return {'7':'power-7','9':'power-9','JQ':'power-JQ-first','K':'power-K-look','KBLACK':'power-KB-own-look'}[p];
+  }
+
+  function directlyDrawnPowerType(card){
+    if(!card) return null;
+
+    if(
+      card.rank==='K' &&
+      (card.suit==='C' || card.suit==='S')
+    ){
+      return 'KBLACK';
+    }
+
+    return powerType(card.rank);
   }
   function powerInstruction(type, mode){
     if(type==='7') return "Power (7/8): click one of your opponent's face-down cards to peek at it.";
@@ -758,6 +778,13 @@
     if(type==='JQ') return mode==='power-JQ-second'
       ? "Power (J/Q): now click a second card to blind-swap with the first."
       : "Power (J/Q): click any two cards on the table to blind-swap them (no peeking).";
+    if(type==='KBLACK'){
+      if(mode==='power-KB-own-look') return "Black King: first click one of your own cards to look at it.";
+      if(mode==='power-KB-opp-look') return "Black King: now click one of your opponent's cards to look at it.";
+      if(mode==='power-KB-swap-first') return "Black King: choose the first card for an optional swap.";
+      if(mode==='power-KB-swap-second') return "Black King: choose the second card to complete the swap.";
+      return "Black King power.";
+    }
     if(type==='K') return mode==='power-K-swap'
       ? "Power (King): click one of your own cards to swap with the one you looked at, or skip."
       : "Power (King): click any one face-down card to look at it.";
@@ -1047,9 +1074,15 @@
   }
  
   function resolveDirectlyDrawnCardPower(state, card){
-    const p = powerType(card.rank);
-    if(p){ state.turnState='await_power'; state.pendingPower={type:p}; }
-    else { completeTurn(state); }
+    const p = directlyDrawnPowerType(card);
+
+    if(p){
+      state.turnState='await_power';
+      state.pendingPower={type:p};
+    } else {
+      completeTurn(state);
+    }
+
     return p;
   }
  
@@ -1158,6 +1191,18 @@
           return myTurn && GAME.turnState==='await_power';
         case 'power-K-swap':
           return myTurn && GAME.turnState==='await_power' && owner===ME.slot;
+        case 'power-KB-own-look':
+          return myTurn && GAME.turnState==='await_power' && owner===ME.slot;
+        case 'power-KB-opp-look':
+          return myTurn && GAME.turnState==='await_power' && owner!==ME.slot;
+        case 'power-KB-swap-first':
+          return myTurn && GAME.turnState==='await_power';
+        case 'power-KB-swap-second':
+          return myTurn &&
+            GAME.turnState==='await_power' &&
+            !(blackKingSwapFirst &&
+              owner===blackKingSwapFirst.owner &&
+              idx===blackKingSwapFirst.idx);
         case 'snap-give':
           return owner===ME.slot;
         default:
@@ -1312,6 +1357,96 @@
       return;
     }
  
+    if(selectMode==='power-KB-own-look' && myTurn){
+      if(owner!==ME.slot) return;
+
+      const card = GAME.players[owner].cards[idx];
+      showPeekPopup(card, "Black King: you looked at one of your own cards.", [
+        {
+          label:"Continue",
+          action:()=>{
+            hidePeekPopup();
+            selectMode='power-KB-opp-look';
+            render();
+          }
+        }
+      ]);
+      return;
+    }
+
+    if(selectMode==='power-KB-opp-look' && myTurn){
+      if(owner===ME.slot) return;
+
+      const card = GAME.players[owner].cards[idx];
+      const opponentName = GAME.players[owner].name;
+
+      showPeekPopup(card, `Black King: you looked at ${opponentName}'s card.`, [
+        {
+          label:"Choose a swap",
+          action:()=>{
+            hidePeekPopup();
+            blackKingSwapFirst=null;
+            selectMode='power-KB-swap-first';
+            render();
+          }
+        },
+        {
+          label:"No swap",
+          secondary:true,
+          action:async ()=>{
+            hidePeekPopup();
+            await updateGame(fresh=>{
+              fresh.log.push(`${fresh.players[ME.slot].name} used the Black King's two peeks and chose not to swap.`);
+              completeTurn(fresh);
+            });
+            blackKingSwapFirst=null;
+            selectMode=null;
+            render();
+          }
+        }
+      ]);
+      return;
+    }
+
+    if(selectMode==='power-KB-swap-first' && myTurn){
+      blackKingSwapFirst={owner, idx};
+      selectMode='power-KB-swap-second';
+      render();
+      return;
+    }
+
+    if(selectMode==='power-KB-swap-second' && myTurn){
+      if(
+        blackKingSwapFirst &&
+        owner===blackKingSwapFirst.owner &&
+        idx===blackKingSwapFirst.idx
+      ) return;
+
+      await updateGame(fresh=>{
+        const first=fresh.players[blackKingSwapFirst.owner].cards[blackKingSwapFirst.idx];
+        const second=fresh.players[owner].cards[idx];
+        if(!first || !second) return;
+
+        fresh.players[blackKingSwapFirst.owner].cards[blackKingSwapFirst.idx]=second;
+        fresh.players[owner].cards[idx]=first;
+
+        setMotion(fresh, {
+          card:first,
+          from:{owner:blackKingSwapFirst.owner, idx:blackKingSwapFirst.idx},
+          to:{owner, idx},
+          visibility:'hidden'
+        });
+
+        fresh.log.push(`${fresh.players[ME.slot].name} used the Black King to swap two chosen cards.`);
+        completeTurn(fresh);
+      });
+
+      blackKingSwapFirst=null;
+      selectMode=null;
+      render();
+      return;
+    }
+
     if(selectMode==='power-K-look' && myTurn){
       const card = GAME.players[owner].cards[idx];
       kLookTarget = {owner, idx};
@@ -1708,6 +1843,15 @@
 
     $('discardBtn').style.display =
       (myTurn && deckDecisionActive) ? 'inline-block' : 'none';
+
+    const drawnPowerType = deckDecisionActive
+      ? directlyDrawnPowerType(GAME.drawnCard)
+      : null;
+
+    $('usePowerBtn').style.display =
+      (myTurn && deckDecisionActive && drawnPowerType)
+        ? 'inline-block'
+        : 'none';
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
     $('powerBar').classList.toggle('visible', !!showPower);
@@ -1957,27 +2101,73 @@
   $('swapBtn').onclick = ()=>{ selectMode = 'swap-own'; render(); };
  
   $('discardBtn').onclick = async ()=>{
-    let ptype = null;
     await updateGame(fresh=>{
-      if(fresh.turn!==ME.slot || fresh.turnState!=='await_decide') return;
+      if(
+        fresh.turn!==ME.slot ||
+        fresh.turnState!=='await_decide' ||
+        fresh.drawnSource!=='deck'
+      ) return;
+
       const card = fresh.drawnCard;
       if(!card) return;
+
       fresh.drawnCard = null;
       fresh.drawnSource = null;
       fresh.discard.push(card);
+
       setMotion(fresh, {
         card,
         from:'drawn-area',
         to:'discard-pile',
         visibility:'public'
       });
-      fresh.log.push(`${fresh.players[ME.slot].name} directly discarded ${cardLabel(card)} from the draw. ${
-        powerType(card.rank) ? 'They may use or skip its power.' : ''
-      }`);
-      ptype = resolveDirectlyDrawnCardPower(fresh, card);
+
+      fresh.log.push(`${fresh.players[ME.slot].name} discarded ${cardLabel(card)} without using its power.`);
+      completeTurn(fresh);
     });
-    selectMode = ptype ? powerInitialMode(ptype) : null;
+
+    blackKingSwapFirst=null;
+    selectMode=null;
     render();
+  };
+
+  $('usePowerBtn').onclick = async ()=>{
+    let selectedPowerType = null;
+
+    await updateGame(fresh=>{
+      if(
+        fresh.turn!==ME.slot ||
+        fresh.turnState!=='await_decide' ||
+        fresh.drawnSource!=='deck'
+      ) return;
+
+      const card = fresh.drawnCard;
+      if(!card) return;
+
+      selectedPowerType = directlyDrawnPowerType(card);
+      if(!selectedPowerType) return;
+
+      fresh.drawnCard = null;
+      fresh.drawnSource = null;
+      fresh.discard.push(card);
+
+      setMotion(fresh, {
+        card,
+        from:'drawn-area',
+        to:'discard-pile',
+        visibility:'public'
+      });
+
+      fresh.turnState='await_power';
+      fresh.pendingPower={type:selectedPowerType};
+      fresh.log.push(`${fresh.players[ME.slot].name} discarded ${cardLabel(card)} and chose to use its power.`);
+    });
+
+    if(selectedPowerType){
+      blackKingSwapFirst=null;
+      selectMode=powerInitialMode(selectedPowerType);
+      render();
+    }
   };
  
   $('skipPowerBtn').onclick = async ()=>{
@@ -1985,7 +2175,7 @@
       fresh.log.push(`${fresh.players[ME.slot].name} skipped the power.`);
       completeTurn(fresh);
     });
-    selectMode=null; jqFirst=null; kLookTarget=null;
+    selectMode=null; jqFirst=null; kLookTarget=null; blackKingSwapFirst=null;
     hidePeekPopup();
   };
  
