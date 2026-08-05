@@ -131,7 +131,14 @@
   .grids-wrap{display:flex; gap:26px; flex-wrap:wrap; justify-content:center; width:100%; margin:18px 0;}
   .player-zone{flex:1; min-width:230px; background:rgba(0,0,0,.18); border-radius:14px; padding:14px; border:1px solid rgba(216,178,106,.2);}
   .player-zone h3{font-size:1rem; color:var(--gold); margin-bottom:10px; font-family:'Inter',sans-serif; font-weight:700;}
-  .card-grid{display:flex; flex-wrap:wrap; gap:8px;}
+  .card-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 64px);
+    grid-auto-rows:92px;
+    gap:8px;
+    justify-content:start;
+    align-items:start;
+  }
  
   .table-row{display:flex; gap:28px; align-items:center; justify-content:center; margin:10px 0 6px;}
   .pile-wrap{display:flex; flex-direction:column; align-items:center; gap:6px;}
@@ -150,10 +157,16 @@
   .log-panel{width:100%; max-width:920px; margin-top:6px; background:rgba(0,0,0,.22); border-radius:12px; padding:10px 16px; max-height:130px; overflow-y:auto;}
   .log-line{font-size:.78rem; opacity:.8; padding:3px 0; border-bottom:1px dashed rgba(244,236,218,.12); font-family:'JetBrains Mono',monospace;}
  
-  .peek-grid{display:grid; grid-template-columns:repeat(2,74px); gap:12px; margin:18px 0;}
+  .peek-grid{display:grid; grid-template-columns:repeat(2,74px); grid-auto-rows:92px; gap:12px; margin:18px 0; justify-content:center;}
  
   .ro-player{background:rgba(0,0,0,.2); border-radius:12px; padding:14px; margin-bottom:14px;}
-  .ro-grid{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;}
+  .ro-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 74px);
+    gap:8px;
+    margin:10px 0;
+    justify-content:start;
+  }
   .ro-grid > div{display:flex; flex-direction:column; align-items:center; gap:4px;}
   .ro-val{font-family:'JetBrains Mono',monospace; font-size:.72rem; color:var(--gold);}
   .ro-total{font-weight:700; font-family:'Fraunces',serif; font-size:1.05rem;}
@@ -236,10 +249,6 @@
       <h2 style="margin-bottom:10px;">Waiting room</h2>
       <div>Room code: <span class="room-code" id="waitRoomCode"></span></div>
       <ul class="player-list" id="waitPlayersList"></ul>
-      <div class="toggle-row">
-        <label for="chkSnap">Enable optional Snap rule</label>
-        <input type="checkbox" id="chkSnap" />
-      </div>
       <div class="row">
         <button class="secondary" id="btnCopyLink" type="button">Copy invite link</button>
         <button id="btnStart" type="button" disabled>Start Game</button>
@@ -281,7 +290,10 @@
       <div class="action-bar">
         <button id="drawBtn" style="display:none;">Draw Card</button>
         <button id="cambioBtn" class="danger" style="display:none;">Call Cambio!</button>
-        <button id="snapBtn" class="secondary" style="display:none;">Snap!</button>
+        <button id="snapBtn" class="secondary" style="display:none;">Play Matching Card</button>
+      </div>
+      <div class="hint" id="matchHint" style="text-align:center; display:none;">
+        Either player may play a face-down card matching the discard rank at any time. A wrong guess adds a penalty card and does not change the turn.
       </div>
  
       <div class="drawn-card-area" id="drawnCardArea">
@@ -348,7 +360,7 @@
   // Paste the config object from your own free Firebase project here.
   // See the on-page "Setup" screen (shown automatically until you fill this in)
   // for step-by-step instructions on creating one — it takes about 5 minutes.
-const FIREBASE_CONFIG = {
+ const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBr9Dpiuo5w-8alyhchmSrr3fbCuFoMpHc",
   authDomain: "cambio-dba44.firebaseapp.com",
   databaseURL: "https://cambio-dba44-default-rtdb.firebaseio.com",
@@ -490,21 +502,16 @@ const FIREBASE_CONFIG = {
     : Object.values(state.log || {});
 
   state.scores = state.scores || { 0: 0, 1: 0 };
+  state.snapEnabled = true;
 
   return state;
 }
-  async function loadState(room) {
-  try {
-    const snap = await roomRef(room).get();
-
-    return snap.exists()
-      ? normalizeGameState(snap.val())
-      : null;
-  } catch (e) {
-    console.error('load failed', e);
-    return null;
+  async function loadState(room){
+    try{
+      const snap = await roomRef(room).get();
+      return snap.exists() ? snap.val() : null;
+    }catch(e){ console.error('load failed', e); return null; }
   }
-}
   async function saveState(room, state){
     try{
       await roomRef(room).set(state);
@@ -567,6 +574,7 @@ const FIREBASE_CONFIG = {
  
   // ---------- GAME LOGIC ----------
   function dealNewRound(state){
+    state.snapEnabled = true;
     state.deck = buildShuffledDeck();
     state.discard = [];
     state.players.forEach(p=>{
@@ -632,7 +640,7 @@ const FIREBASE_CONFIG = {
   async function attemptSnap(owner, idx){
     let needGive = false;
     await updateGame(fresh=>{
-      if(!fresh.snapEnabled || fresh.discard.length===0) return;
+      if(fresh.discard.length===0) return;
       const top = fresh.discard[fresh.discard.length-1];
       const arr = fresh.players[owner].cards;
       const target = arr[idx];
@@ -641,13 +649,13 @@ const FIREBASE_CONFIG = {
       if(target.rank === top.rank){
         arr.splice(idx,1);
         fresh.discard.push(target);
-        fresh.log.push(`${me} snapped a matching ${cardLabel(target)}!`);
+        fresh.log.push(`${me} played a matching ${cardLabel(target)} without using a turn.`);
         if(owner !== ME.slot) needGive = true;
       } else {
         if(fresh.deck.length===0) reshuffleDiscardIntoDeck(fresh);
         const penalty = fresh.deck.length ? fresh.deck.pop() : null;
         if(penalty) fresh.players[ME.slot].cards.push(penalty);
-        fresh.log.push(`${me} snapped incorrectly and took a penalty card.`);
+        fresh.log.push(`${me} played the wrong rank and took a penalty card without changing the turn.`);
       }
     });
     if(needGive){ snapGiveTarget = owner; selectMode = 'snap-give'; }
@@ -818,7 +826,6 @@ const FIREBASE_CONFIG = {
     $('waitRoomCode').textContent = GAME.room;
     $('waitPlayersList').innerHTML = GAME.players.map(p=>`<li>${escapeHTML(p.name)}${p.slot===ME.slot?' (you)':''}</li>`).join('')
       + (GAME.players.length<2 ? '<li class="pending">Waiting for opponent…</li>' : '');
-    $('chkSnap').checked = !!GAME.snapEnabled;
     $('btnStart').disabled = GAME.players.length < 2;
   }
  
@@ -853,8 +860,9 @@ const FIREBASE_CONFIG = {
  
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
     $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
-    $('snapBtn').style.display = (GAME.snapEnabled && GAME.discard.length>0) ? 'inline-block' : 'none';
-    $('snapBtn').textContent = selectMode==='snap-select' ? 'Cancel Snap' : 'Snap!';
+    $('snapBtn').style.display = (GAME.discard.length>0) ? 'inline-block' : 'none';
+    $('matchHint').style.display = (GAME.discard.length>0) ? 'block' : 'none';
+    $('snapBtn').textContent = selectMode==='snap-select' ? 'Cancel Match' : 'Play Matching Card';
  
     const showDrawn = myTurn && GAME.turnState==='await_decide' && GAME.drawnCard;
     $('drawnCardArea').style.display = showDrawn ? 'block' : 'none';
@@ -923,7 +931,7 @@ const FIREBASE_CONFIG = {
         if(current===null || current===undefined){
           assignedSlot = 0;
           return {
-            room, snapEnabled:false, phase:'lobby',
+            room, snapEnabled:true, phase:'lobby',
             players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
             deck:[], discard:[], turn:0, turnState:null,
             drawnCard:null, pendingPower:null, cambio:null,
@@ -963,11 +971,6 @@ const FIREBASE_CONFIG = {
     subscribeToRoom(room);
     render();
   }
- 
-  $('chkSnap').onchange = async ()=>{
-    const val = $('chkSnap').checked;
-    await updateGame(fresh=>{ fresh.snapEnabled = val; });
-  };
   $('btnStart').onclick = async ()=>{
     await updateGame(fresh=>{
       if(fresh.players.length<2) return;
