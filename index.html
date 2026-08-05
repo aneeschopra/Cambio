@@ -178,6 +178,25 @@
   .pile-label{font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--gold); font-family:'JetBrains Mono',monospace;}
   .count{font-size:.75rem; color:var(--cream); opacity:.8;}
  
+
+  .pile-clickable{
+    cursor:pointer;
+    outline:2px solid var(--gold);
+    outline-offset:4px;
+    border-radius:10px;
+    animation:pile-ready 1.5s ease-in-out infinite;
+  }
+  @keyframes pile-ready{
+    0%,100%{filter:drop-shadow(0 0 0 rgba(216,178,106,0));}
+    50%{filter:drop-shadow(0 0 8px rgba(216,178,106,.65));}
+  }
+  .drawn-source-note{
+    font-size:.78rem;
+    color:var(--gold);
+    margin:0 0 7px;
+    min-height:1em;
+  }
+
   .turn-banner{font-family:'Fraunces',serif; font-size:1.3rem; margin:6px 0 10px; text-align:center;}
   .cambio-notice{background:var(--danger); color:var(--cream); padding:8px 14px; border-radius:8px; font-weight:600; text-align:center; margin-bottom:10px; display:none;}
  
@@ -418,6 +437,7 @@
           </div>
 
           <div class="drawn-card-area" id="drawnCardArea">
+            <div class="drawn-source-note" id="drawnSourceNote"></div>
             <div id="drawnCardDisplay" data-motion-anchor="drawn-card"></div>
             <div class="action-bar">
               <button id="swapBtn">Swap into one of my cards</button>
@@ -643,6 +663,7 @@
 
   state.scores = state.scores || { 0: 0, 1: 0 };
   state.snapEnabled = true;
+  if(state.drawnSource === undefined) state.drawnSource = null;
 
   return state;
 }
@@ -791,6 +812,7 @@
       reason: 'seven-cards'
     };
     state.drawnCard = null;
+    state.drawnSource = null;
     state.pendingPower = null;
     state.turnState = null;
     state.log = state.log || [];
@@ -937,6 +959,8 @@
       switch(selectMode){
         case 'swap-own':
           return myTurn && GAME.turnState==='await_decide' && owner===ME.slot;
+        case 'take-discard-swap':
+          return myTurn && GAME.turnState==='await_discard_swap' && owner===ME.slot;
         case 'power-7':
           return myTurn && GAME.turnState==='await_power' && owner!==ME.slot;
         case 'power-9':
@@ -977,11 +1001,41 @@
     if(
       myTurn &&
       !selectMode &&
-      (GAME.turnState === 'await_decide' || GAME.turnState === 'await_power')
+      (
+        GAME.turnState === 'await_decide' ||
+        GAME.turnState === 'await_power' ||
+        GAME.turnState === 'await_discard_swap'
+      )
     ){
       return;
     }
  
+    if(selectMode==='take-discard-swap' && myTurn && owner===ME.slot){
+      await updateGame(fresh=>{
+        if(
+          fresh.turn !== ME.slot ||
+          fresh.turnState !== 'await_discard_swap' ||
+          fresh.drawnSource !== 'discard' ||
+          !fresh.drawnCard
+        ) return;
+
+        const taken = fresh.drawnCard;
+        const old = fresh.players[ME.slot].cards[idx];
+        if(!old) return;
+
+        fresh.players[ME.slot].cards[idx] = taken;
+        fresh.drawnCard = null;
+        fresh.drawnSource = null;
+        fresh.discard.push(old);
+        fresh.log.push(`${fresh.players[ME.slot].name} used their turn to take ${cardLabel(taken)} from the discard pile and replace one of their cards. No power activated.`);
+        completeTurn(fresh);
+      });
+
+      selectMode = null;
+      render();
+      return;
+    }
+
     if(selectMode==='swap-own' && myTurn && owner===ME.slot){
       await updateGame(fresh=>{
         const drawn = fresh.drawnCard;
@@ -989,6 +1043,7 @@
         const old = fresh.players[ME.slot].cards[idx];
         fresh.players[ME.slot].cards[idx] = drawn;
         fresh.drawnCard = null;
+        fresh.drawnSource = null;
         fresh.discard.push(old);
         fresh.log.push(`${fresh.players[ME.slot].name} swapped in a new card and discarded ${cardLabel(old)}. Hand-discarded cards do not activate powers.`);
         completeTurn(fresh);
@@ -1206,13 +1261,34 @@
  
   function renderGame(){
     const me = GAME.players[ME.slot];
+
+    // Rebuild the local selection mode if the page refreshed while the player
+    // was choosing which card to replace with the taken discard.
+    if(
+      GAME.turn === ME.slot &&
+      GAME.turnState === 'await_discard_swap' &&
+      GAME.drawnSource === 'discard'
+    ){
+      selectMode = 'take-discard-swap';
+    }
     const opp = GAME.players[1-ME.slot];
     const myTurn = GAME.turn === ME.slot;
  
     $('turnBanner').textContent = myTurn ? "Your turn" : `${opp.name}'s turn`;
+    const canTakeDiscard =
+      myTurn &&
+      GAME.turnState === 'await_draw' &&
+      GAME.discard.length > 0 &&
+      !selectMode;
+
     $('discardPileEl').innerHTML = GAME.discard.length
       ? cardHTML(GAME.discard[GAME.discard.length-1], true)
       : `<div class="card-slot empty">Empty</div>`;
+
+    $('discardPileEl').classList.toggle('pile-clickable', canTakeDiscard);
+    $('discardPileEl').title = canTakeDiscard
+      ? 'Use your turn to take this card and replace one of yours'
+      : '';
     $('deckCount').textContent = GAME.deck.length;
  
     $('myNameLabel').textContent = me.name + ' (you)';
@@ -1232,9 +1308,32 @@
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
     $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
  
-    const showDrawn = myTurn && GAME.turnState==='await_decide' && GAME.drawnCard;
+    const showDeckDecision =
+      myTurn &&
+      GAME.turnState === 'await_decide' &&
+      GAME.drawnCard &&
+      GAME.drawnSource === 'deck';
+
+    const showDiscardReplacement =
+      myTurn &&
+      GAME.turnState === 'await_discard_swap' &&
+      GAME.drawnCard &&
+      GAME.drawnSource === 'discard';
+
+    const showDrawn = showDeckDecision || showDiscardReplacement;
     $('drawnCardArea').classList.toggle('visible', !!showDrawn);
-    if(showDrawn){ $('drawnCardDisplay').innerHTML = cardHTML(GAME.drawnCard, true); }
+
+    if(showDrawn){
+      $('drawnCardDisplay').innerHTML = cardHTML(GAME.drawnCard, true);
+      $('drawnSourceNote').textContent = showDiscardReplacement
+        ? 'Discard card taken — click one of your own cards to replace. This uses your whole turn.'
+        : 'Card drawn from deck';
+    } else {
+      $('drawnSourceNote').textContent = '';
+    }
+
+    $('swapBtn').style.display = showDeckDecision ? 'inline-block' : 'none';
+    $('discardBtn').style.display = showDeckDecision ? 'inline-block' : 'none';
  
     const showPower = myTurn && GAME.turnState==='await_power' && GAME.pendingPower;
     $('powerBar').classList.toggle('visible', !!showPower);
@@ -1311,7 +1410,7 @@
             room, snapEnabled:true, phase:'lobby',
             players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
             deck:[], discard:[], turn:0, turnState:null,
-            drawnCard:null, pendingPower:null, cambio:null,
+            drawnCard:null, drawnSource:null, pendingPower:null, cambio:null,
             log:[`${name} created the room.`],
             scores:{0:0,1:0}, round:0
           };
@@ -1413,6 +1512,40 @@
   }
 };
  
+  $('discardPileEl').onclick = async ()=>{
+    if(
+      !GAME ||
+      !ME ||
+      GAME.phase !== 'playing' ||
+      GAME.turn !== ME.slot ||
+      GAME.turnState !== 'await_draw' ||
+      selectMode ||
+      GAME.discard.length === 0
+    ){
+      return;
+    }
+
+    await updateGame(fresh=>{
+      if(
+        fresh.turn !== ME.slot ||
+        fresh.turnState !== 'await_draw' ||
+        fresh.discard.length === 0
+      ){
+        return;
+      }
+
+      const card = fresh.discard.pop();
+      fresh.drawnCard = card;
+      fresh.drawnSource = 'discard';
+      fresh.turnState = 'await_discard_swap';
+      fresh.pendingPower = null;
+      fresh.log.push(`${fresh.players[ME.slot].name} picked up the top discard and must replace one of their cards.`);
+    });
+
+    selectMode = 'take-discard-swap';
+    render();
+  };
+
   $('drawBtn').onclick = async ()=>{
     await updateGame(fresh=>{
       if(fresh.turn!==ME.slot || fresh.turnState!=='await_draw') return;
@@ -1420,6 +1553,7 @@
       if(fresh.deck.length===0) return;
       const card = fresh.deck.pop();
       fresh.drawnCard = card;
+      fresh.drawnSource = 'deck';
       fresh.turnState = 'await_decide';
       fresh.log.push(`${fresh.players[ME.slot].name} drew a card.`);
     });
@@ -1443,6 +1577,7 @@
       const card = fresh.drawnCard;
       if(!card) return;
       fresh.drawnCard = null;
+      fresh.drawnSource = null;
       fresh.discard.push(card);
       fresh.log.push(`${fresh.players[ME.slot].name} directly discarded ${cardLabel(card)} from the draw. ${
         powerType(card.rank) ? 'They may use or skip its power.' : ''
