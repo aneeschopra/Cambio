@@ -861,6 +861,7 @@
   state.snapEnabled = true;
   if(state.drawnSource === undefined) state.drawnSource = null;
   if(state.motion === undefined) state.motion = null;
+  if(state.matchChain === undefined) state.matchChain = null;
 
   return state;
 }
@@ -1071,6 +1072,7 @@
     state.cambio = null;
     state.forcedLoss = null;
     state.lastPenalty = null;
+    state.matchChain = null;
     state.round = (state.round||0) + 1;
     if(!state.scores) state.scores = {0:0,1:0};
     state.log.push(`— Round ${state.round} dealt —`);
@@ -1128,32 +1130,72 @@
  
   async function attemptSnap(owner, idx){
     let needGive = false;
+    let lateMatchIgnored = false;
+
     await updateGame(fresh=>{
       if(fresh.discard.length===0) return;
+
       const top = fresh.discard[fresh.discard.length-1];
-      const arr = fresh.players[owner].cards;
-      const target = arr[idx];
+      const target = fresh.players[owner].cards[idx];
       if(!target) return;
-      const me = fresh.players[ME.slot].name;
+
+      const actingPlayer = fresh.players[ME.slot];
+      const chain = fresh.matchChain;
+
+      // If the other player already won this matching race for the current
+      // discard rank, a late matching card stays in the hand with no penalty.
+      if(
+        chain &&
+        chain.rank === top.rank &&
+        chain.playerSlot !== ME.slot &&
+        target.rank === top.rank
+      ){
+        lateMatchIgnored = true;
+        return;
+      }
+
       if(target.rank === top.rank){
         removeCardFromStableSlot(fresh.players[owner], idx);
         fresh.discard.push(target);
+
+        // The first successful matcher owns this same-rank streak.
+        // That player may continue putting down more matching cards.
+        if(
+          !fresh.matchChain ||
+          fresh.matchChain.rank !== target.rank
+        ){
+          fresh.matchChain = {
+            rank:target.rank,
+            playerSlot:ME.slot,
+            startedAt:Date.now()
+          };
+        }
+
         setMotion(fresh, {
           card:target,
           from:{owner, idx},
           to:'discard-pile',
           visibility:'public'
         });
-        fresh.log.push(`${me} played a matching ${cardLabel(target)} without using a turn.`);
+
+        fresh.log.push(`${actingPlayer.name} played a matching ${cardLabel(target)} without using a turn.`);
         if(owner !== ME.slot) needGive = true;
       } else {
         const added = givePenaltyCard(fresh, ME.slot);
         if(added){
-          fresh.log.push(`${me} played the wrong rank and took a penalty card without changing the turn.`);
+          fresh.log.push(`${actingPlayer.name} played the wrong rank and took a penalty card without changing the turn.`);
         }
       }
     });
-    if(needGive){ snapGiveTarget = owner; selectMode = 'snap-give'; }
+
+    if(lateMatchIgnored){
+      showToast('Too late — the other player matched first');
+    }
+
+    if(needGive){
+      snapGiveTarget = owner;
+      selectMode = 'snap-give';
+    }
   }
  
   // ---------- POPUP ----------
@@ -1261,6 +1303,7 @@
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
+        fresh.matchChain = null;
         setMotion(fresh, {
           steps:[
             {
@@ -1290,6 +1333,7 @@
         fresh.drawnCard = null;
         fresh.drawnSource = null;
         fresh.discard.push(old);
+        fresh.matchChain = null;
         setMotion(fresh, {
           steps:[
             {
@@ -1927,6 +1971,7 @@
             players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
             deck:[], discard:[], turn:0, turnState:null,
             drawnCard:null, drawnSource:null, pendingPower:null, cambio:null, motion:null,
+            matchChain:null,
             log:[`${name} created the room.`],
             scores:{0:0,1:0}, round:0
           };
@@ -2051,6 +2096,7 @@
       }
 
       const card = fresh.discard.pop();
+      fresh.matchChain = null;
       fresh.drawnCard = card;
       fresh.drawnSource = 'discard';
       setMotion(fresh, {
@@ -2112,6 +2158,7 @@
       fresh.drawnCard = null;
       fresh.drawnSource = null;
       fresh.discard.push(card);
+      fresh.matchChain = null;
 
       setMotion(fresh, {
         card,
@@ -2148,6 +2195,7 @@
       fresh.drawnCard = null;
       fresh.drawnSource = null;
       fresh.discard.push(card);
+      fresh.matchChain = null;
 
       setMotion(fresh, {
         card,
