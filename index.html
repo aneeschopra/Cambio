@@ -1199,11 +1199,10 @@
   }
  
   // ---------- POPUP ----------
-  function showPeekPopup(card, text, buttons){
-    $('popupCard').innerHTML = cardHTML(card, true);
-    $('popupText').textContent = text;
+  function fillPopupButtons(buttons){
     const btnsEl = $('popupBtns');
     btnsEl.innerHTML = '';
+
     buttons.forEach(b=>{
       const el = document.createElement('button');
       el.textContent = b.label;
@@ -1211,8 +1210,22 @@
       el.onclick = b.action;
       btnsEl.appendChild(el);
     });
+  }
+
+  function showPeekPopup(card, text, buttons){
+    $('popupCard').innerHTML = cardHTML(card, true);
+    $('popupText').textContent = text;
+    fillPopupButtons(buttons);
     $('popupOverlay').style.display = 'flex';
   }
+
+  function showChoicePopup(text, buttons){
+    $('popupCard').innerHTML = '';
+    $('popupText').textContent = text;
+    fillPopupButtons(buttons);
+    $('popupOverlay').style.display = 'flex';
+  }
+
   function hidePeekPopup(){ $('popupOverlay').style.display = 'none'; }
  
   // ---------- CLICK HANDLING ----------
@@ -1395,10 +1408,20 @@
         fresh.players[jqFirst.owner].cards[jqFirst.idx] = b;
         fresh.players[owner].cards[idx] = a;
         setMotion(fresh, {
-          card:a,
-          from:{owner:jqFirst.owner, idx:jqFirst.idx},
-          to:{owner, idx},
-          visibility:'hidden'
+          parallelSteps:[
+            {
+              card:a,
+              from:{owner:jqFirst.owner, idx:jqFirst.idx},
+              to:{owner, idx},
+              visibility:'hidden'
+            },
+            {
+              card:b,
+              from:{owner, idx},
+              to:{owner:jqFirst.owner, idx:jqFirst.idx},
+              visibility:'hidden'
+            }
+          ]
         });
         fresh.log.push(`${fresh.players[ME.slot].name} blind-swapped two cards on the table.`);
         completeTurn(fresh);
@@ -1430,31 +1453,52 @@
       const card = GAME.players[owner].cards[idx];
       const opponentName = GAME.players[owner].name;
 
-      showPeekPopup(card, `Black King: you looked at ${opponentName}'s card.`, [
-        {
-          label:"Swap ANY card",
-          action:()=>{
-            hidePeekPopup();
-            blackKingSwapFirst=null;
-            selectMode='power-KB-swap-first';
-            render();
+      showPeekPopup(
+        card,
+        `Black King: you looked at ${opponentName}'s card.`,
+        [
+          {
+            label:"OK",
+            action:()=>{
+              hidePeekPopup();
+
+              showChoicePopup(
+                "Would you like to swap any two cards?",
+                [
+                  {
+                    label:"Swap ANY card",
+                    action:()=>{
+                      hidePeekPopup();
+                      blackKingSwapFirst=null;
+                      selectMode='power-KB-swap-first';
+                      render();
+                    }
+                  },
+                  {
+                    label:"Don't use power",
+                    secondary:true,
+                    action:async ()=>{
+                      hidePeekPopup();
+
+                      await updateGame(fresh=>{
+                        fresh.log.push(
+                          `${fresh.players[ME.slot].name} used the Black King's two peeks and chose not to swap.`
+                        );
+                        completeTurn(fresh);
+                      });
+
+                      blackKingSwapFirst=null;
+                      selectMode=null;
+                      render();
+                    }
+                  }
+                ]
+              );
+            }
           }
-        },
-        {
-          label:"No swap",
-          secondary:true,
-          action:async ()=>{
-            hidePeekPopup();
-            await updateGame(fresh=>{
-              fresh.log.push(`${fresh.players[ME.slot].name} used the Black King's two peeks and chose not to swap.`);
-              completeTurn(fresh);
-            });
-            blackKingSwapFirst=null;
-            selectMode=null;
-            render();
-          }
-        }
-      ]);
+        ]
+      );
+
       return;
     }
 
@@ -1481,10 +1525,26 @@
         fresh.players[owner].cards[idx]=first;
 
         setMotion(fresh, {
-          card:first,
-          from:{owner:blackKingSwapFirst.owner, idx:blackKingSwapFirst.idx},
-          to:{owner, idx},
-          visibility:'hidden'
+          parallelSteps:[
+            {
+              card:first,
+              from:{
+                owner:blackKingSwapFirst.owner,
+                idx:blackKingSwapFirst.idx
+              },
+              to:{owner, idx},
+              visibility:'hidden'
+            },
+            {
+              card:second,
+              from:{owner, idx},
+              to:{
+                owner:blackKingSwapFirst.owner,
+                idx:blackKingSwapFirst.idx
+              },
+              visibility:'hidden'
+            }
+          ]
         });
 
         fresh.log.push(`${fresh.players[ME.slot].name} used the Black King to swap two chosen cards.`);
@@ -1722,17 +1782,28 @@
       }
     }
 
-    const steps = Array.isArray(motion.steps)
-      ? motion.steps
-      : [{
-          card:motion.card,
-          from:motion.from,
-          to:motion.to,
-          visibility:motion.visibility
-        }];
+    if(Array.isArray(motion.parallelSteps)){
+      // Card-to-card swaps move both affected cards at the same time.
+      // Each card stays face down, so both players see the movement
+      // without learning either card's identity.
+      await Promise.all(
+        motion.parallelSteps.map(step=>
+          playMotionStep(step, motion.actorSlot)
+        )
+      );
+    } else {
+      const steps = Array.isArray(motion.steps)
+        ? motion.steps
+        : [{
+            card:motion.card,
+            from:motion.from,
+            to:motion.to,
+            visibility:motion.visibility
+          }];
 
-    for(const step of steps){
-      await playMotionStep(step, motion.actorSlot);
+      for(const step of steps){
+        await playMotionStep(step, motion.actorSlot);
+      }
     }
 
     // No outgoing-card animation: simply reveal the replaced card
