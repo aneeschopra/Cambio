@@ -1761,12 +1761,22 @@
   function renderPeek(){
     const me = GAME.players[ME.slot];
     const opp = GAME.players[1-ME.slot];
-    $('btnPeekReady').style.display = me.ready ? 'none' : 'inline-block';
+    const readyButton = $('btnPeekReady');
+
+    readyButton.style.display = me.ready ? 'none' : 'inline-block';
+    readyButton.disabled = !!me.ready;
+    readyButton.textContent = "I've seen my cards — Ready";
+
     $('peekWaitingMsg').style.display = me.ready ? 'block' : 'none';
-    $('peekOtherStatus').textContent = opp ? (opp.ready ? `${opp.name} is ready.` : `Waiting for ${opp.name}…`) : '';
+    $('peekOtherStatus').textContent = opp
+      ? (opp.ready ? `${opp.name} is ready.` : `Waiting for ${opp.name}…`)
+      : '';
+
     $('peekGrid').innerHTML = me.cards.map((c,i)=>{
       const faceUp = (i>=2) && !me.ready;
-      return c ? cardHTML(c, faceUp, {}) : `<div class="discard-placeholder" aria-label="No discard yet"></div>`;
+      return c
+        ? cardHTML(c, faceUp, {})
+        : `<div class="discard-placeholder" aria-label="No discard yet"></div>`;
     }).join('');
   }
  
@@ -2217,7 +2227,14 @@
   };
  
   $('btnPlayAgain').onclick = async ()=>{
-    await updateGame(fresh=>{ dealNewRound(fresh); });
+    const readyButton = $('btnPeekReady');
+
+    readyButton.disabled = false;
+    readyButton.textContent = "I've seen my cards — Ready";
+
+    await updateGame(fresh=>{
+      dealNewRound(fresh);
+    });
   };
  
   document.getElementById('gameGridsWrap').addEventListener('click', (e)=>{
