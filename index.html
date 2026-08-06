@@ -958,7 +958,35 @@
     return (player.cards || []).filter(Boolean).length;
   }
 
+  function lockedCambioSlot(state){
+    return (
+      state &&
+      state.phase === 'playing' &&
+      state.cambio &&
+      Number.isInteger(Number(state.cambio.callerSlot))
+    )
+      ? Number(state.cambio.callerSlot)
+      : null;
+  }
+
+  function isCambioHandLocked(state, playerSlot){
+    const lockedSlot = lockedCambioSlot(state);
+    return lockedSlot !== null && Number(playerSlot) === lockedSlot;
+  }
+
+  function isFinalTurnAfterCambio(state, actingSlot){
+    const lockedSlot = lockedCambioSlot(state);
+    return lockedSlot !== null && Number(actingSlot) !== lockedSlot;
+  }
+
   function addCardToStableSlot(player, card){
+    if(
+      GAME &&
+      isCambioHandLocked(GAME, player.slot)
+    ){
+      return -1;
+    }
+
     player.cards = Array.isArray(player.cards) ? player.cards : [];
 
     while(player.cards.length < 4){
@@ -977,6 +1005,13 @@
   }
 
   function removeCardFromStableSlot(player, idx){
+    if(
+      GAME &&
+      isCambioHandLocked(GAME, player.slot)
+    ){
+      return null;
+    }
+
     if(!player.cards || !player.cards[idx]) return null;
 
     const card = player.cards[idx];
@@ -1135,6 +1170,11 @@
     await updateGame(fresh=>{
       if(fresh.discard.length===0) return;
 
+      if(isCambioHandLocked(fresh, owner)){
+        lateMatchIgnored = true;
+        return;
+      }
+
       const top = fresh.discard[fresh.discard.length-1];
       const target = fresh.players[owner].cards[idx];
       if(!target) return;
@@ -1189,7 +1229,11 @@
     });
 
     if(lateMatchIgnored){
-      showToast('Too late — the other player matched first');
+      showToast(
+        isCambioHandLocked(GAME, owner)
+          ? 'That hand is locked after Cambio'
+          : 'Too late — the other player matched first'
+      );
     }
 
     if(needGive){
@@ -1232,6 +1276,9 @@
   function isClickableCell(owner, idx){
     if(!GAME || !ME || GAME.phase!=='playing') return false;
     if(!GAME.players[owner] || !GAME.players[owner].cards[idx]) return false;
+
+    // The player who called Cambio has a fully locked hand.
+    if(isCambioHandLocked(GAME, owner)) return false;
 
     const myTurn = GAME.turn === ME.slot;
 
@@ -1403,6 +1450,11 @@
     if(selectMode==='power-JQ-second' && myTurn){
       if(jqFirst && owner===jqFirst.owner && idx===jqFirst.idx) return;
       await updateGame(fresh=>{
+        if(
+          isCambioHandLocked(fresh, jqFirst.owner) ||
+          isCambioHandLocked(fresh, owner)
+        ) return;
+
         const a = fresh.players[jqFirst.owner].cards[jqFirst.idx];
         const b = fresh.players[owner].cards[idx];
         fresh.players[jqFirst.owner].cards[jqFirst.idx] = b;
@@ -1517,6 +1569,11 @@
       ) return;
 
       await updateGame(fresh=>{
+        if(
+          isCambioHandLocked(fresh, blackKingSwapFirst.owner) ||
+          isCambioHandLocked(fresh, owner)
+        ) return;
+
         const first=fresh.players[blackKingSwapFirst.owner].cards[blackKingSwapFirst.idx];
         const second=fresh.players[owner].cards[idx];
         if(!first || !second) return;
@@ -1560,9 +1617,17 @@
     if(selectMode==='snap-give'){
       if(owner!==ME.slot) return;
       await updateGame(fresh=>{
+        if(isCambioHandLocked(fresh, snapGiveTarget)) return;
+
         const card = removeCardFromStableSlot(fresh.players[ME.slot], idx);
         if(!card) return;
-        const targetIdx = addCardToStableSlot(fresh.players[snapGiveTarget], card);
+
+        const targetIdx = addCardToStableSlot(
+          fresh.players[snapGiveTarget],
+          card
+        );
+
+        if(targetIdx < 0) return;
         setMotion(fresh, {
           card,
           from:{owner:ME.slot, idx},
@@ -1942,7 +2007,11 @@
       } else if(myTurn){
         const decisionPowerType = directlyDrawnPowerType(GAME.drawnCard);
         $('drawnSourceNote').textContent = decisionPowerType
-          ? drawnPowerDescription(decisionPowerType)
+          ? (
+              isFinalTurnAfterCambio(GAME, ME.slot)
+                ? `${drawnPowerDescription(decisionPowerType)} The Cambio caller's hand is locked, so this power cannot be used.`
+                : drawnPowerDescription(decisionPowerType)
+            )
           : 'Card drawn from deck';
       } else {
         $('drawnSourceNote').textContent =
@@ -1962,8 +2031,16 @@
       ? directlyDrawnPowerType(GAME.drawnCard)
       : null;
 
+    const powerBlockedByCambioLock =
+      isFinalTurnAfterCambio(GAME, ME.slot);
+
     $('usePowerBtn').style.display =
-      (myTurn && deckDecisionActive && drawnPowerType)
+      (
+        myTurn &&
+        deckDecisionActive &&
+        drawnPowerType &&
+        !powerBlockedByCambioLock
+      )
         ? 'inline-block'
         : 'none';
  
@@ -2264,7 +2341,8 @@
       if(
         fresh.turn!==ME.slot ||
         fresh.turnState!=='await_decide' ||
-        fresh.drawnSource!=='deck'
+        fresh.drawnSource!=='deck' ||
+        isFinalTurnAfterCambio(fresh, ME.slot)
       ) return;
 
       const card = fresh.drawnCard;
