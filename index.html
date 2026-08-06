@@ -831,8 +831,29 @@
     : Object.values(state.log || {});
 
   state.players.forEach(p=>{
-    if(!Array.isArray(p.cards)){
-      p.cards = Object.values(p.cards || {});
+    const storedCards = p.cards || [];
+
+    if(Array.isArray(storedCards)){
+      const fixedLength = Math.max(4, storedCards.length);
+      p.cards = Array.from(
+        {length:fixedLength},
+        (_, idx)=>storedCards[idx] || false
+      );
+    } else {
+      const numericKeys = Object.keys(storedCards)
+        .map(Number)
+        .filter(Number.isInteger);
+
+      const highestIndex = numericKeys.length
+        ? Math.max(...numericKeys)
+        : -1;
+
+      const fixedLength = Math.max(4, highestIndex + 1);
+
+      p.cards = Array.from(
+        {length:fixedLength},
+        (_, idx)=>storedCards[idx] || false
+      );
     }
   });
 
@@ -937,28 +958,33 @@
   }
 
   function addCardToStableSlot(player, card){
-    player.cards = player.cards || [];
+    player.cards = Array.isArray(player.cards) ? player.cards : [];
 
-    // Refill any empty position in the original 2x2 grid first.
-    for(let i=0; i<4; i++){
+    while(player.cards.length < 4){
+      player.cards.push(false);
+    }
+
+    for(let i=4; i<player.cards.length; i++){
       if(!player.cards[i]){
         player.cards[i] = card;
         return i;
       }
     }
 
-    // Otherwise append to the right without shifting existing positions.
     player.cards.push(card);
     return player.cards.length - 1;
   }
 
   function removeCardFromStableSlot(player, idx){
     if(!player.cards || !player.cards[idx]) return null;
-    const card = player.cards[idx];
-    player.cards[idx] = null;
 
-    // Trim only empty slots at the very end. Never shift existing cards.
-    while(player.cards.length > 4 && player.cards[player.cards.length - 1] === null){
+    const card = player.cards[idx];
+    player.cards[idx] = false;
+
+    while(
+      player.cards.length > 4 &&
+      !player.cards[player.cards.length - 1]
+    ){
       player.cards.pop();
     }
 
@@ -1735,15 +1761,26 @@
     $('myNameLabel').textContent = me.name + ' (you)';
     $('oppNameLabel').textContent = opp.name;
  
-    $('myGridEl').innerHTML = me.cards.map((c,i)=>
+    const myCardSlots = Array.from(
+      {length:Math.max(4, me.cards.length)},
+      (_, idx)=>me.cards[idx] || false
+    );
+
+    const opponentCardSlots = Array.from(
+      {length:Math.max(4, opp.cards.length)},
+      (_, idx)=>opp.cards[idx] || false
+    );
+
+    $('myGridEl').innerHTML = myCardSlots.map((c,i)=>
       c
         ? cardHTML(c, false, {owner:ME.slot, idx:i, clickable:isClickableCell(ME.slot,i)})
-        : `<div class="card-slot empty" data-owner="${ME.slot}" data-idx="${i}">Empty</div>`
+        : `<div class="card-slot empty" data-owner="${ME.slot}" data-idx="${i}" aria-label="Empty card position"></div>`
     ).join('');
-    $('oppGridEl').innerHTML = opp.cards.map((c,i)=>
+
+    $('oppGridEl').innerHTML = opponentCardSlots.map((c,i)=>
       c
         ? cardHTML(c, false, {owner:1-ME.slot, idx:i, clickable:isClickableCell(1-ME.slot,i)})
-        : `<div class="card-slot empty" data-owner="${1-ME.slot}" data-idx="${i}">Empty</div>`
+        : `<div class="card-slot empty" data-owner="${1-ME.slot}" data-idx="${i}" aria-label="Empty card position"></div>`
     ).join('');
  
     $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
@@ -1825,7 +1862,13 @@
     const rows = GAME.players.map(p=>{
       return `<div class="ro-player">
         <h3>${escapeHTML(p.name)}${p.slot===ME.slot?' (you)':''}</h3>
-        <div class="ro-grid">${p.cards.filter(Boolean).map(c=>`<div>${cardHTML(c,true)}<div class="ro-val">${cardValue(c)}</div></div>`).join('')}</div>
+        <div class="ro-grid">${Array.from(
+          {length:Math.max(4, p.cards.length)},
+          (_, idx)=>p.cards[idx] || false
+        ).map(c=>c
+          ? `<div>${cardHTML(c,true)}<div class="ro-val">${cardValue(c)}</div></div>`
+          : `<div><div class="card-slot empty" aria-label="Empty card position"></div><div class="ro-val">—</div></div>`
+        ).join('')}</div>
         <div class="ro-total">Cards held: ${activeCardCount(p)}${p.roundTotal !== undefined ? ` · Round total: ${p.roundTotal}` : ''}</div>
         <div class="ro-cumulative">Cumulative score: ${GAME.scores[p.slot]}</div>
       </div>`;
