@@ -287,10 +287,28 @@
     height:92px;
     pointer-events:none;
     border-radius:8px;
+    outline:3px solid var(--gold);
+    outline-offset:4px;
     box-shadow:
-      0 0 0 2px var(--gold),
-      0 0 0 7px rgba(216,178,106,.20),
-      0 10px 24px rgba(0,0,0,.35);
+      0 0 0 8px rgba(216,178,106,.22),
+      0 0 24px 10px rgba(216,178,106,.42),
+      0 12px 28px rgba(0,0,0,.42);
+  }
+  .peek-indicator-clone::after{
+    content:'VIEWING';
+    position:absolute;
+    left:50%;
+    top:-25px;
+    transform:translateX(-50%);
+    padding:4px 7px;
+    border-radius:6px;
+    background:var(--gold);
+    color:var(--ink);
+    font-family:'JetBrains Mono',monospace;
+    font-size:.55rem;
+    font-weight:700;
+    letter-spacing:.08em;
+    box-shadow:0 4px 12px rgba(0,0,0,.28);
   }
   .peek-indicator-clone .card-slot{
     width:64px;
@@ -323,6 +341,12 @@
 
   .turn-banner{font-family:'Fraunces',serif; font-size:1.3rem; margin:6px 0 10px; text-align:center;}
   .cambio-notice{background:var(--danger); color:var(--cream); padding:8px 14px; border-radius:8px; font-weight:600; text-align:center; margin-bottom:10px; display:none;}
+
+  .cambio-notice.final-match{
+    background:var(--gold);
+    color:var(--ink);
+    border:1px solid rgba(255,255,255,.22);
+  }
  
   .action-bar{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:10px 0;}
   .turn-dynamic-area{
@@ -1049,6 +1073,9 @@
   if(state.motion === undefined) state.motion = null;
   if(state.peekSignal === undefined) state.peekSignal = null;
   if(state.matchChain === undefined) state.matchChain = null;
+  if(state.nextStarterSlot === undefined) state.nextStarterSlot = 0;
+  if(state.roundStarterSlot === undefined) state.roundStarterSlot = 0;
+  if(state.finalMatchEndsAt === undefined) state.finalMatchEndsAt = null;
 
   return state;
 }
@@ -1236,6 +1263,10 @@
       winnerSlot: winner ? winner.slot : null,
       reason: 'seven-cards'
     };
+
+    if(winner){
+      state.nextStarterSlot = winner.slot;
+    }
     state.drawnCard = null;
     state.drawnSource = null;
     state.pendingPower = null;
@@ -1299,7 +1330,13 @@
       p.roundTotal = 0;
     });
     state.phase = 'peek';
-    state.turn = 0;
+
+    const starterSlot = Number.isInteger(Number(state.nextStarterSlot))
+      ? Number(state.nextStarterSlot)
+      : 0;
+
+    state.turn = starterSlot;
+    state.roundStarterSlot = starterSlot;
     state.turnState = 'await_draw';
     state.drawnCard = null;
     state.pendingPower = null;
@@ -1308,6 +1345,7 @@
     state.lastPenalty = null;
     state.peekSignal = null;
     state.matchChain = null;
+    state.finalMatchEndsAt = null;
     state.round = (state.round||0) + 1;
     if(!state.scores) state.scores = {0:0,1:0};
     state.log.push(`— Round ${state.round} dealt —`);
@@ -1343,14 +1381,23 @@
   function completeTurn(state){
     if(state.cambio){
       state.cambio.turnsLeft -= 1;
+
       if(state.cambio.turnsLeft <= 0){
-        state.phase = 'roundover';
+        // The opponent's final normal turn is complete.
+        // Give that player five seconds to make any last legal matches
+        // before the round is actually scored.
+        state.phase = 'finalmatch';
+        state.turnState = 'final_match';
         state.drawnCard = null;
+        state.drawnSource = null;
         state.pendingPower = null;
-        finalizeRound(state);
+        state.finalMatchEndsAt = Date.now() + 5000;
+        state.matchChain = null;
+        state.log.push('Final matching window — 5 seconds remaining.');
         return;
       }
     }
+
     passTurnPlain(state);
   }
  
@@ -1360,6 +1407,24 @@
       p.roundTotal = total;
       state.scores[p.slot] = (state.scores[p.slot]||0) + total;
     });
+
+    const p0 = state.players[0];
+    const p1 = state.players[1];
+
+    if(p0 && p1){
+      if(p0.roundTotal < p1.roundTotal){
+        state.nextStarterSlot = p0.slot;
+      } else if(p1.roundTotal < p0.roundTotal){
+        state.nextStarterSlot = p1.slot;
+      } else {
+        // On a tie, keep the same starter for the next round.
+        state.nextStarterSlot = Number.isInteger(Number(state.roundStarterSlot))
+          ? Number(state.roundStarterSlot)
+          : 0;
+      }
+    }
+
+    state.finalMatchEndsAt = null;
     state.log.push('Round over — cards revealed!');
   }
  
@@ -1369,6 +1434,14 @@
 
     await updateGame(fresh=>{
       if(fresh.discard.length===0) return;
+
+      if(
+        fresh.phase === 'finalmatch' &&
+        fresh.finalMatchEndsAt &&
+        Date.now() >= fresh.finalMatchEndsAt
+      ){
+        return;
+      }
 
       if(isCambioHandLocked(fresh, owner)){
         lateMatchIgnored = true;
@@ -1474,13 +1547,24 @@
  
   // ---------- CLICK HANDLING ----------
   function isClickableCell(owner, idx){
-    if(!GAME || !ME || GAME.phase!=='playing') return false;
+    if(
+      !GAME ||
+      !ME ||
+      (GAME.phase!=='playing' && GAME.phase!=='finalmatch')
+    ) return false;
+
     if(!GAME.players[owner] || !GAME.players[owner].cards[idx]) return false;
 
     // The player who called Cambio has a fully locked hand.
     if(isCambioHandLocked(GAME, owner)) return false;
 
     const myTurn = GAME.turn === ME.slot;
+
+    // During the 5-second final window, only the player who just took
+    // the final turn may make matching attempts. The Cambio caller is locked.
+    if(GAME.phase === 'finalmatch'){
+      return myTurn && owner === ME.slot;
+    }
 
     // Explicit turn/power actions always take priority over matching.
     if(selectMode){
@@ -1897,10 +1981,17 @@
     // - The active player may match only before drawing.
     // - While choosing what to do with a drawn card or resolving its power,
     //   accidental card clicks do nothing.
-    if(!selectMode && GAME.phase==='playing'){
+    if(
+      !selectMode &&
+      (GAME.phase==='playing' || GAME.phase==='finalmatch')
+    ){
       const matchingAllowed =
-        GAME.turn !== ME.slot ||
-        GAME.turnState === 'await_draw';
+        GAME.phase === 'finalmatch'
+          ? (GAME.turn === ME.slot && owner === ME.slot)
+          : (
+              GAME.turn !== ME.slot ||
+              GAME.turnState === 'await_draw'
+            );
 
       if(!matchingAllowed) return;
 
@@ -1953,7 +2044,7 @@
         opacity:0
       }
     ], {
-      duration:950,
+      duration:1250,
       easing:'ease-in-out',
       fill:'forwards'
     });
@@ -2196,12 +2287,110 @@
     }
   }
 
+  // ---------- FINAL CAMBIO MATCH TIMER ----------
+  let finalMatchTimeout = null;
+  let finalMatchTicker = null;
+
+  function clearFinalMatchTimers(){
+    if(finalMatchTimeout){
+      clearTimeout(finalMatchTimeout);
+      finalMatchTimeout = null;
+    }
+    if(finalMatchTicker){
+      clearInterval(finalMatchTicker);
+      finalMatchTicker = null;
+    }
+  }
+
+  function updateFinalMatchCountdown(){
+    if(
+      !GAME ||
+      GAME.phase !== 'finalmatch' ||
+      !GAME.finalMatchEndsAt
+    ) return;
+
+    const remainingMs = Math.max(0, GAME.finalMatchEndsAt - Date.now());
+    const remaining = Math.ceil(remainingMs / 1000);
+
+    const notice = $('cambioNotice');
+    notice.style.display = 'block';
+    notice.classList.add('final-match');
+
+    if(GAME.turn === ME.slot){
+      notice.textContent =
+        `Final matching window: ${remaining}s — make any last matching plays now.`;
+    } else {
+      notice.textContent =
+        `Final matching window: ${remaining}s — ${GAME.players[GAME.turn].name} may make last matches.`;
+    }
+  }
+
+  async function finishFinalMatchWindow(){
+    if(!ME) return;
+
+    try{
+      await updateGame(fresh=>{
+        if(
+          fresh.phase !== 'finalmatch' ||
+          !fresh.finalMatchEndsAt
+        ) return;
+
+        if(Date.now() < fresh.finalMatchEndsAt) return;
+
+        fresh.phase = 'roundover';
+        fresh.turnState = null;
+        fresh.matchChain = null;
+        finalizeRound(fresh);
+      });
+    }catch(e){
+      console.error('final matching timer failed', e);
+    }
+  }
+
+  function scheduleFinalMatchWindow(){
+    clearFinalMatchTimers();
+
+    if(
+      !GAME ||
+      GAME.phase !== 'finalmatch' ||
+      !GAME.finalMatchEndsAt
+    ){
+      return;
+    }
+
+    updateFinalMatchCountdown();
+
+    finalMatchTicker = setInterval(()=>{
+      updateFinalMatchCountdown();
+    }, 200);
+
+    const delay = Math.max(0, GAME.finalMatchEndsAt - Date.now()) + 60;
+
+    finalMatchTimeout = setTimeout(()=>{
+      clearFinalMatchTimers();
+      finishFinalMatchWindow();
+    }, delay);
+  }
+
   // ---------- RENDER ----------
   function render(){
-    if(!GAME || !ME){ showScreen('lobby'); return; }
+    if(!GAME || !ME){
+      clearFinalMatchTimers();
+      showScreen('lobby');
+      return;
+    }
+
+    if(GAME.phase === 'finalmatch'){
+      scheduleFinalMatchWindow();
+    } else {
+      clearFinalMatchTimers();
+    }
     if(GAME.phase==='lobby'){ renderWaiting(); showScreen('waiting'); }
     else if(GAME.phase==='peek'){ renderPeek(); showScreen('peek'); }
-    else if(GAME.phase==='playing'){ renderGame(); showScreen('game'); }
+    else if(GAME.phase==='playing' || GAME.phase==='finalmatch'){
+      renderGame();
+      showScreen('game');
+    }
     else if(GAME.phase==='roundover'){ renderRoundover(); showScreen('roundover'); }
   }
  
@@ -2249,8 +2438,12 @@
     const opp = GAME.players[1-ME.slot];
     const myTurn = GAME.turn === ME.slot;
  
-    $('turnBanner').textContent = myTurn ? "Your turn" : `${opp.name}'s turn`;
+    $('turnBanner').textContent =
+      GAME.phase === 'finalmatch'
+        ? (myTurn ? "Final matching window" : `${opp.name}'s final matching window`)
+        : (myTurn ? "Your turn" : `${opp.name}'s turn`);
     const canTakeDiscard =
+      GAME.phase === 'playing' &&
       myTurn &&
       GAME.turnState === 'await_draw' &&
       GAME.discard.length > 0 &&
@@ -2291,8 +2484,20 @@
         : `<div class="card-slot empty" data-owner="${1-ME.slot}" data-idx="${i}" aria-label="Empty card position"></div>`
     ).join('');
  
-    $('drawBtn').style.display = (myTurn && GAME.turnState==='await_draw') ? 'inline-block' : 'none';
-    $('cambioBtn').style.display = (myTurn && GAME.turnState==='await_draw' && !GAME.cambio) ? 'inline-block' : 'none';
+    $('drawBtn').style.display =
+      (GAME.phase==='playing' && myTurn && GAME.turnState==='await_draw')
+        ? 'inline-block'
+        : 'none';
+
+    $('cambioBtn').style.display =
+      (
+        GAME.phase==='playing' &&
+        myTurn &&
+        GAME.turnState==='await_draw' &&
+        !GAME.cambio
+      )
+        ? 'inline-block'
+        : 'none';
  
     const deckDecisionActive =
       GAME.turnState === 'await_decide' &&
@@ -2370,9 +2575,17 @@
     $('idleActionNote').style.display =
       (!showDrawn && !resolvingPower) ? 'flex' : 'none';
  
-    $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
-    if(GAME.cambio){
-      $('cambioNotice').textContent = `${GAME.players[GAME.cambio.callerSlot].name} called Cambio! Final turn(s) remaining: ${GAME.cambio.turnsLeft}`;
+    $('cambioNotice').classList.remove('final-match');
+
+    if(GAME.phase === 'finalmatch'){
+      updateFinalMatchCountdown();
+    } else {
+      $('cambioNotice').style.display = GAME.cambio ? 'block' : 'none';
+
+      if(GAME.cambio){
+        $('cambioNotice').textContent =
+          `${GAME.players[GAME.cambio.callerSlot].name} called Cambio! Final turn(s) remaining: ${GAME.cambio.turnsLeft}`;
+      }
     }
  
     $('gameLog').innerHTML = GAME.log.slice(-10).slice().reverse().map(l=>`<div class="log-line">${escapeHTML(l)}</div>`).join('');
@@ -2449,6 +2662,9 @@
             drawnCard:null, drawnSource:null, pendingPower:null, cambio:null, motion:null,
             peekSignal:null,
             matchChain:null,
+            nextStarterSlot:0,
+            roundStarterSlot:0,
+            finalMatchEndsAt:null,
             log:[`${name} created the room.`],
             scores:{0:0,1:0}, round:0
           };
