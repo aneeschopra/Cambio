@@ -1068,6 +1068,7 @@
   });
 
   state.scores = state.scores || { 0: 0, 1: 0 };
+  state.wins = state.wins || { 0: 0, 1: 0 };
   state.snapEnabled = true;
   if(state.drawnSource === undefined) state.drawnSource = null;
   if(state.motion === undefined) state.motion = null;
@@ -1265,6 +1266,8 @@
     };
 
     if(winner){
+      if(!state.wins) state.wins = {0:0,1:0};
+      state.wins[winner.slot] = (state.wins[winner.slot] || 0) + 1;
       state.nextStarterSlot = winner.slot;
     }
     state.drawnCard = null;
@@ -1348,6 +1351,7 @@
     state.finalMatchEndsAt = null;
     state.round = (state.round||0) + 1;
     if(!state.scores) state.scores = {0:0,1:0};
+    if(!state.wins) state.wins = {0:0,1:0};
     state.log.push(`— Round ${state.round} dealt —`);
   }
  
@@ -1405,19 +1409,22 @@
     state.players.forEach(p=>{
       const total = p.cards.filter(Boolean).reduce((s,c)=>s+cardValue(c),0);
       p.roundTotal = total;
-      state.scores[p.slot] = (state.scores[p.slot]||0) + total;
     });
+
+    if(!state.wins) state.wins = {0:0,1:0};
 
     const p0 = state.players[0];
     const p1 = state.players[1];
 
     if(p0 && p1){
       if(p0.roundTotal < p1.roundTotal){
+        state.wins[p0.slot] = (state.wins[p0.slot] || 0) + 1;
         state.nextStarterSlot = p0.slot;
       } else if(p1.roundTotal < p0.roundTotal){
+        state.wins[p1.slot] = (state.wins[p1.slot] || 0) + 1;
         state.nextStarterSlot = p1.slot;
       } else {
-        // On a tie, keep the same starter for the next round.
+        // On a tie, nobody gains a round win; keep the same starter next round.
         state.nextStarterSlot = Number.isInteger(Number(state.roundStarterSlot))
           ? Number(state.roundStarterSlot)
           : 0;
@@ -2603,7 +2610,7 @@
           : `<div><div class="card-slot empty" aria-label="Empty card position"></div><div class="ro-val">—</div></div>`
         ).join('')}</div>
         <div class="ro-total">Cards held: ${activeCardCount(p)}${p.roundTotal !== undefined ? ` · Round total: ${p.roundTotal}` : ''}</div>
-        <div class="ro-cumulative">Cumulative score: ${GAME.scores[p.slot]}</div>
+        <div class="ro-cumulative">Rounds won: ${GAME.wins[p.slot] || 0}</div>
       </div>`;
     }).join('');
     $('roundoverGrids').innerHTML = rows;
@@ -2666,7 +2673,7 @@
             roundStarterSlot:0,
             finalMatchEndsAt:null,
             log:[`${name} created the room.`],
-            scores:{0:0,1:0}, round:0
+            scores:{0:0,1:0}, wins:{0:0,1:0}, round:0
           };
         }
         const existingIdx = current.players.findIndex(p=>p.name.toLowerCase()===name.toLowerCase());
