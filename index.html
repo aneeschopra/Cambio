@@ -280,6 +280,27 @@
     animation:none !important;
   }
 
+  .peek-indicator-clone{
+    position:fixed;
+    z-index:998;
+    width:64px;
+    height:92px;
+    pointer-events:none;
+    border-radius:8px;
+    box-shadow:
+      0 0 0 2px var(--gold),
+      0 0 0 7px rgba(216,178,106,.20),
+      0 10px 24px rgba(0,0,0,.35);
+  }
+  .peek-indicator-clone .card-slot{
+    width:64px;
+    height:92px;
+    animation:none !important;
+  }
+  .peek-indicator-clone .card-back{
+    animation:none !important;
+  }
+
   .pile-clickable{
     cursor:pointer;
     outline:2px solid var(--gold);
@@ -1026,6 +1047,7 @@
   state.snapEnabled = true;
   if(state.drawnSource === undefined) state.drawnSource = null;
   if(state.motion === undefined) state.motion = null;
+  if(state.peekSignal === undefined) state.peekSignal = null;
   if(state.matchChain === undefined) state.matchChain = null;
 
   return state;
@@ -1066,6 +1088,7 @@
       GAME = normalizeGameState(result.snapshot.val());
       render();
       maybeAnimateLatestMotion();
+      maybeAnimateLatestPeekSignal();
 
       if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
         if(GAME.lastPenalty.playerSlot === ME.slot){
@@ -1097,6 +1120,7 @@
       GAME = val;
       render();
       maybeAnimateLatestMotion();
+      maybeAnimateLatestPeekSignal();
 
       if(GAME.lastPenalty && GAME.lastPenalty.at !== previousPenaltyAt){
         const penalized = GAME.players[GAME.lastPenalty.playerSlot];
@@ -1229,6 +1253,16 @@
     };
   }
 
+  function setPeekSignal(state, owner, idx, type){
+    state.peekSignal = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      actorSlot: ME ? ME.slot : null,
+      owner,
+      idx,
+      type
+    };
+  }
+
   function givePenaltyCard(state, playerSlot){
     if(state.deck.length===0) reshuffleDiscardIntoDeck(state);
     const penalty = state.deck.length ? state.deck.pop() : null;
@@ -1272,6 +1306,7 @@
     state.cambio = null;
     state.forcedLoss = null;
     state.lastPenalty = null;
+    state.peekSignal = null;
     state.matchChain = null;
     state.round = (state.round||0) + 1;
     if(!state.scores) state.scores = {0:0,1:0};
@@ -1580,13 +1615,29 @@
  
     if(selectMode==='power-7' && myTurn){
       if(owner===ME.slot) return;
+
       const card = GAME.players[owner].cards[idx];
       const oppName = GAME.players[owner].name;
+
+      await updateGame(fresh=>{
+        if(
+          fresh.turn!==ME.slot ||
+          fresh.turnState!=='await_power' ||
+          isCambioHandLocked(fresh, owner)
+        ) return;
+
+        setPeekSignal(fresh, owner, idx, 'power-7');
+      });
+
       showPeekPopup(card, `You peeked at ${oppName}'s card.`, [
         {label:'Continue', action: async ()=>{
           hidePeekPopup();
-          await updateGame(fresh=>{ fresh.log.push(`${fresh.players[ME.slot].name} peeked at ${oppName}'s card.`); completeTurn(fresh); });
-          selectMode=null; render();
+          await updateGame(fresh=>{
+            fresh.log.push(`${fresh.players[ME.slot].name} peeked at ${oppName}'s card.`);
+            completeTurn(fresh);
+          });
+          selectMode=null;
+          render();
         }}
       ]);
       return;
@@ -1594,12 +1645,27 @@
  
     if(selectMode==='power-9' && myTurn){
       if(owner!==ME.slot) return;
+
       const card = GAME.players[owner].cards[idx];
+
+      await updateGame(fresh=>{
+        if(
+          fresh.turn!==ME.slot ||
+          fresh.turnState!=='await_power'
+        ) return;
+
+        setPeekSignal(fresh, owner, idx, 'power-9');
+      });
+
       showPeekPopup(card, `You peeked at your own card.`, [
         {label:'Continue', action: async ()=>{
           hidePeekPopup();
-          await updateGame(fresh=>{ fresh.log.push(`${fresh.players[ME.slot].name} peeked at one of their own cards.`); completeTurn(fresh); });
-          selectMode=null; render();
+          await updateGame(fresh=>{
+            fresh.log.push(`${fresh.players[ME.slot].name} peeked at one of their own cards.`);
+            completeTurn(fresh);
+          });
+          selectMode=null;
+          render();
         }}
       ]);
       return;
@@ -1651,6 +1717,16 @@
       if(owner!==ME.slot) return;
 
       const card = GAME.players[owner].cards[idx];
+
+      await updateGame(fresh=>{
+        if(
+          fresh.turn!==ME.slot ||
+          fresh.turnState!=='await_power'
+        ) return;
+
+        setPeekSignal(fresh, owner, idx, 'power-KB-own');
+      });
+
       showPeekPopup(card, "Black King: you looked at one of your own cards.", [
         {
           label:"Continue",
@@ -1669,6 +1745,16 @@
 
       const card = GAME.players[owner].cards[idx];
       const opponentName = GAME.players[owner].name;
+
+      await updateGame(fresh=>{
+        if(
+          fresh.turn!==ME.slot ||
+          fresh.turnState!=='await_power' ||
+          isCambioHandLocked(fresh, owner)
+        ) return;
+
+        setPeekSignal(fresh, owner, idx, 'power-KB-opp');
+      });
 
       showPeekPopup(
         card,
@@ -1826,6 +1912,73 @@
 
   // ---------- TARGETED CARD MOVEMENT ANIMATION ----------
   let lastSeenMotionId = null;
+  let lastSeenPeekSignalId = null;
+
+  function animatePeekIndicator(owner, idx){
+    const targetEl = playerCardElement(owner, idx);
+    if(!targetEl) return;
+
+    const rect = targetEl.getBoundingClientRect();
+
+    const clone = document.createElement('div');
+    clone.className = 'peek-indicator-clone';
+    clone.innerHTML = cardHTML(
+      {rank:'?', suit:null, id:'peek-indicator'},
+      false,
+      {}
+    );
+
+    clone.style.left = `${rect.left}px`;
+    clone.style.top = `${rect.top}px`;
+
+    document.body.appendChild(clone);
+
+    const animation = clone.animate([
+      {
+        transform:'scale(1)',
+        opacity:.35
+      },
+      {
+        transform:'scale(1.06)',
+        opacity:1,
+        offset:.35
+      },
+      {
+        transform:'scale(1.06)',
+        opacity:1,
+        offset:.68
+      },
+      {
+        transform:'scale(1)',
+        opacity:0
+      }
+    ], {
+      duration:950,
+      easing:'ease-in-out',
+      fill:'forwards'
+    });
+
+    const finish = ()=>clone.remove();
+    animation.onfinish = finish;
+    animation.oncancel = finish;
+  }
+
+  function maybeAnimateLatestPeekSignal(){
+    if(
+      !GAME ||
+      !GAME.peekSignal ||
+      GAME.peekSignal.id === lastSeenPeekSignalId
+    ) return;
+
+    const signal = GAME.peekSignal;
+    lastSeenPeekSignalId = signal.id;
+
+    // The actor already sees the actual card privately in the popup.
+    // Only the other player gets the face-down positional indicator.
+    if(!ME || signal.actorSlot === ME.slot) return;
+
+    animatePeekIndicator(signal.owner, signal.idx);
+  }
 
   function rectForSelector(selector){
     const el = document.querySelector(selector);
@@ -2294,6 +2447,7 @@
             players:[{slot:0, name, cards:[], ready:false, roundTotal:0}],
             deck:[], discard:[], turn:0, turnState:null,
             drawnCard:null, drawnSource:null, pendingPower:null, cambio:null, motion:null,
+            peekSignal:null,
             matchChain:null,
             log:[`${name} created the room.`],
             scores:{0:0,1:0}, round:0
